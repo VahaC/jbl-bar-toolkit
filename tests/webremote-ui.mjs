@@ -846,6 +846,10 @@ try {
   await page.waitForFunction(()=>document.querySelectorAll('.timer-item').length===2);
   check(await page.locator('[data-sound="off"]').getAttribute('aria-checked')==='true' && !(await page.locator('#timer-countdown').isChecked()) && (await page.locator('.timer-recent-item').count())===2,'options and recent timers are kept on this device');
   await page.locator('#timer-add-another').click();
+  check(await page.locator('#timer-recent .recent-forget').first().getAttribute('aria-label')==='Forget 1 min','each recent timer has a × to forget it');
+  await page.locator('#timer-recent .recent-forget').first().click();
+  check((await page.locator('.timer-recent-item').allTextContents()).join('|')==='Pates · 10 min' && await page.locator('#timer-recent .recent-forget').evaluate(e=>e===document.activeElement),'× forgets a recent timer, the focus on the next ×');
+  check(JSON.parse(await page.evaluate(()=>localStorage.getItem('jbl-timer-recent'))).length===1,'the recent timer is forgotten on this device');
   await page.locator('#timer-new-close').click();
   check(await page.locator('#timer-new').isHidden() && await page.locator('#timer-add-another').evaluate(e=>e===document.activeElement),'the form folds again with its close button');
   await page.locator('#timer-add-another').click();
@@ -984,6 +988,11 @@ try {
   check(/· when the bar is turned on$/.test(await page.locator('.message-item.held .message-detail').textContent()) && (await page.locator('#message').textContent()).includes('Message kept for when the bar is turned on.'),'a held message says it shows when the bar is turned on');
   check((await page.locator('#message-recent .timer-recent-item').first().textContent()).endsWith('· when on'),'the recent message keeps the option');
   await page.locator('#messages-panel').screenshot({path:fileURLToPath(new URL('build/messages-when-on.png',root))});
+  const recentMessages=await page.locator('#message-recent .timer-recent-item').allTextContents();
+  const forgetLabel=await page.locator('#message-recent .recent-forget').first().getAttribute('aria-label');
+  check(/^Forget [A-Z ]+, /.test(forgetLabel),'each recent message has a × to forget it: '+forgetLabel);
+  await page.locator('#message-recent .recent-forget').first().click();
+  check(JSON.stringify(await page.locator('#message-recent .timer-recent-item').allTextContents())===JSON.stringify(recentMessages.slice(1)) && await page.locator('#message-recent .recent-forget').first().evaluate(e=>e===document.activeElement),'× forgets a recent message, the focus on the next ×');
   await page.locator('#message-when-on').uncheck();
   await page.locator('.message-item.held .timer-cancel').click();
   await page.waitForFunction(()=>document.querySelectorAll('.message-item').length===0);

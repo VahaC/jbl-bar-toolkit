@@ -116,7 +116,28 @@ export function createMessages(root, {request}) {
       b.append(play, label);
       b.setAttribute('aria-label', 'Send again: ' + r.text + ', ' + howLong(r) + (r.on && canWait() ? ', when the bar is on' : ''));
       b.addEventListener('click', () => { if (!busy()) send_('display_message', parameters(r.text, r.id, r)); });
-      return b;
+      // × takes it off this device's list (no confirmation: it comes back the next time it is sent).
+      const chip = el('span', 'recent-chip');
+      const x = el('button', 'recent-forget');
+      x.type = 'button';
+      x.setAttribute('aria-label', 'Forget ' + r.text + ', ' + howLong(r));
+      x.title = 'Forget';
+      const cross = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      cross.setAttribute('viewBox', '0 0 24 24'); cross.setAttribute('aria-hidden', 'true');
+      const line = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+      line.setAttribute('d', 'M6 6l12 12M18 6 6 18');
+      cross.append(line);
+      x.append(cross);
+      x.addEventListener('click', () => {
+        const index = recent.indexOf(r);
+        recent = recent.filter(o => o !== r);
+        save(RECENT_KEY, recent);
+        renderRecent();
+        const left = $('message-recent-list').querySelectorAll('.recent-forget');
+        (left[Math.min(index, left.length - 1)] || text).focus();
+      });
+      chip.append(b, x);
+      return chip;
     }));
   }
   function renderOptions() {
