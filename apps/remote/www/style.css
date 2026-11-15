@@ -341,6 +341,11 @@ button:disabled,select:disabled,input:disabled{opacity:.55}
 .message-recent{padding:14px;border-radius:14px;background:#f1ab850d;border:1px solid #f1ab8533}
 .message-recent h3{color:#ffd1bc}
 .message-recent-list{display:flex;flex-wrap:wrap;gap:8px}
+.recent-chip{display:inline-flex;align-items:stretch;max-width:100%;border-radius:22px;background:var(--panel);border:1px solid #f1ab854d}
+.recent-chip .timer-recent-item{border:0;background:transparent;border-radius:22px 0 0 22px;padding-right:4px;min-width:0}
+.recent-forget{display:grid;place-items:center;min-width:44px;min-height:44px;padding:0 12px 0 6px;border:0;border-radius:0 22px 22px 0;background:transparent;color:var(--subtle)}
+.recent-forget:hover:enabled{color:var(--text);background:#ffffff07}
+.recent-forget svg{width:15px;height:15px}
 .message-new{display:grid;gap:14px}
 .message-clock{border-top:1px solid var(--line);padding-top:14px}
 .clock-row{display:grid;gap:10px}.clock-row small{display:block;font-size:var(--font-caption);color:var(--subtle);line-height:1.6;margin-top:4px}

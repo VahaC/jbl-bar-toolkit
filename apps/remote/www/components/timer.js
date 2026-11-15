@@ -194,8 +194,34 @@ export function createTimer(root, {request, supports = () => true}) {
       b.append(play, label);
       b.setAttribute('aria-label', 'Start again: ' + (r.text ? title(r.text) + ', ' : '') + minutesLabel(r.minutes));
       b.addEventListener('click', () => { if (!p.error && !busy()) launch(p.parameters, r.text ? title(r.text) : minutesLabel(r.minutes) + ' timer'); });
-      return b;
+      return recentChip(b, 'Forget ' + (r.text ? title(r.text) + ', ' : '') + minutesLabel(r.minutes), () => {
+        recent = recent.filter(x => x !== r);
+        save(RECENT_KEY, recent);
+        return holder;
+      }, $('timer-minutes'));
     }));
+  }
+  // A recent one and its ×: the × takes it off this device's list (no
+  // confirmation: it comes back the next time it runs). Focus moves to the
+  // next ×, or the form when the list is empty.
+  function recentChip(button, forgetLabel, forget, fallback) {
+    const chip = el('span', 'recent-chip');
+    const x = el('button', 'recent-forget');
+    x.type = 'button';
+    x.setAttribute('aria-label', forgetLabel);
+    x.title = 'Forget';
+    const cross = svg('svg', {viewBox: '0 0 24 24', 'aria-hidden': 'true'});
+    cross.append(svg('path', {d: 'M6 6l12 12M18 6 6 18'}));
+    x.append(cross);
+    x.addEventListener('click', () => {
+      const index = [...chip.parentNode.children].indexOf(chip);
+      const holder = forget();
+      renderRecent();
+      const left = holder.querySelectorAll('.recent-forget');
+      (left[Math.min(index, left.length - 1)] || fallback)?.focus();
+    });
+    chip.append(button, x);
+    return chip;
   }
 
   function soundSentence(o) {
