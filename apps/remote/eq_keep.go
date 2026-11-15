@@ -116,6 +116,10 @@ func (d *device) smartModeNow() bool {
 func (d *device) followFrontEQ(ctx context.Context, report func(string)) {
 	m := &d.eq
 	n, readErr := d.readEQNative()
+	if eqRouteProblemOver(m.problem, readErr) {
+		m.problem = ""
+		m.note("Front EQ: back on a route where it can be reset")
+	}
 	levels, known := d.eqLevels()
 	changed := known && m.levelsKnown && levels != m.levels
 	decision := eqFollowDecision(n, readErr, m.native, m.expected, d.smartModeNow(), changed)
