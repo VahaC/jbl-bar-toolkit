@@ -28,8 +28,20 @@ const eqCustomMode = 5
 
 const (
 	eqDeferredProblem = "Custom EQ is not active on this input. The original tuning is confirmed automatically when Standard Bluetooth playback returns."
-	eqActiveProblem   = "Custom EQ is still active on this input. Select Standard and play Bluetooth audio, then select Reset in Front EQ."
+	// There is no Reset button any more (turning the EQ off is choosing
+	// Original): once Standard Bluetooth audio plays, the remote resets it
+	// before the control by itself.
+	eqActiveProblem = "Custom EQ is still active on this input and can only be reset during Standard Bluetooth playback. Select Standard and play Bluetooth audio, then try again."
 )
+
+// eqRouteProblemOver reports whether a problem set because the EQ could not be
+// reset on another audio route no longer holds: the full reader reads the
+// route again (readErr nil), so a reset and every control work there. Left in
+// place, it kept the Front EQ panel unavailable and its message on screen
+// while the EQ played normally.
+func eqRouteProblemOver(problem string, readErr error) bool {
+	return readErr == nil && (problem == eqActiveProblem || problem == eqDeferredProblem)
+}
 
 func eqPendingDecision(resetErr error, action string, mode func() (uint32, error)) (proceed bool, problem string, err error) {
 	if resetErr == nil {

@@ -63,7 +63,7 @@ func TestEQPendingResetDecision(t *testing.T) {
 		{"custom EQ active refuses levels", errEQRoute, "bass_next", mode(eqCustomMode, nil), false, eqActiveProblem, "Select Standard"},
 		{"custom EQ active allows input", errEQRoute, "input_bluetooth", mode(eqCustomMode, nil), true, eqActiveProblem, ""},
 		{"custom EQ active allows Standard", errEQRoute, "standard", mode(eqCustomMode, nil), true, eqActiveProblem, ""},
-		{"unreadable mode refuses levels", errEQRoute, "atmos_next", mode(0, unreadable), false, eqActiveProblem, "Reset in Front EQ"},
+		{"unreadable mode refuses levels", errEQRoute, "atmos_next", mode(0, unreadable), false, eqActiveProblem, "then try again"},
 		{"unreadable mode allows input", errEQRoute, "input_tv", mode(0, unreadable), true, eqActiveProblem, ""},
 	}
 	for _, c := range cases {
@@ -95,5 +95,24 @@ func TestEQResetBeforeKeepsItsExceptions(t *testing.T) {
 	}
 	if eqResetBefore("power", false) || !eqResetBefore("power", true) {
 		t.Fatal("reset policy changed")
+	}
+}
+
+func TestEQRouteProblemOverOnceTheRouteIsReadable(t *testing.T) {
+	for _, problem := range []string{eqActiveProblem, eqDeferredProblem} {
+		if !eqRouteProblemOver(problem, nil) {
+			t.Errorf("%q kept with the route readable", problem)
+		}
+		if eqRouteProblemOver(problem, errEQRoute) {
+			t.Errorf("%q cleared on another route", problem)
+		}
+	}
+	for _, problem := range []string{"", "EQ backup integrity check failed", "EQ reset pending: write failed"} {
+		if eqRouteProblemOver(problem, nil) {
+			t.Errorf("%q cleared: not a route problem", problem)
+		}
+	}
+	if strings.Contains(eqActiveProblem, "Reset in Front EQ") {
+		t.Error("the message names a Reset button the page no longer has")
 	}
 }
