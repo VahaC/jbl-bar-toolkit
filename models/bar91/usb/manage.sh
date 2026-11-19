@@ -37,7 +37,7 @@ export_logs() {
 "$BB" awk -f "$USB/parse-config.awk" "$USB/config.txt" > "$LOCK/plan" || finish CONFIG_INVALID 1
 . "$LOCK/plan" || finish CONFIG_INVALID 1
 "$BB" rm "$LOCK/plan"
-case "$ACTION" in migrate) ACTION=install;; install|configure|update) ;; *) finish INVALID_INSTALL_ACTION 1;; esac
+case "$ACTION" in reinstall) ACTION=install;; migrate) finish LEGACY_INSTALLATION_REQUIRES_FRESH_SETUP 1;; install|configure|update) ;; *) finish INVALID_INSTALL_ACTION 1;; esac
 if [ -e "$STORE" ] || [ -L "$STORE" ]; then
     owned || finish TOOLKIT_STORE_CONFLICT 1
     [ -z "$("$BB" find "$STORE" -type l)" ] || finish TOOLKIT_SYMLINK_CONFLICT 1
@@ -151,7 +151,7 @@ if [ -n "${WIFI_SSID_HEX-}" ]; then
     printf '%s\n' "$WIFI_SSID_HEX" > "$STORE/ssh-input/wifi.ssid.hex" || finish WIFI_CREDENTIALS_FAILED 1
     printf '%s\n' "$WIFI_PSK_HEX" > "$STORE/ssh-input/wifi.psk.hex" || finish WIFI_CREDENTIALS_FAILED 1
 fi
-printf 'ALLOWED_PC=%s\nINTERFACE=wlan0\nAUTOSTART=1\n' "$ALLOWED_CIDR" > "$STORE/ssh-input/settings.conf" || finish SSH_SETTINGS_FAILED 1
+printf 'ALLOWED_PC=%s\nINTERFACE=auto\nAUTOSTART=1\n' "$ALLOWED_CIDR" > "$STORE/ssh-input/settings.conf" || finish SSH_SETTINGS_FAILED 1
 if regular "$STORE/ssh-input/wifi.ssid.hex"; then
     "$BB" mkdir -p "$STORE/network" || finish NETWORK_STORE_FAILED 1
     JBL_SSH_USB="$STORE/ssh-input" JBL_SSH_STORE="$STORE/network" "$BB" timeout 130 /bin/sh "$STORE/ssh-input/wifi.sh" || {
@@ -178,16 +178,6 @@ if [ "$SSH" = true ]; then
         printf 'JBL_LOCAL_SSH_REV1\n' > "$SSH_STORE/OWNER.txt" || finish SSH_OWNER_WRITE_FAILED 1
     fi
     marker "$SSH_STORE/TOOLKIT" || finish SSH_OWNERSHIP_FAILED 1
-    if legacy_archive_owned && regular "$LEGACY_STORE/RETIRED"; then
-        component_owned "$LEGACY_STORE/JBLLocalSSH" JBL_LOCAL_SSH_REV1 || finish LEGACY_SSH_KEY_OWNER_CONFLICT 1
-        for name in host_ed25519 host_ed25519.pub; do
-            if [ -e "$SSH_STORE/$name" ] || [ -L "$SSH_STORE/$name" ]; then
-                regular "$SSH_STORE/$name" && "$BB" cmp -s "$LEGACY_STORE/JBLLocalSSH/$name" "$SSH_STORE/$name" || finish LEGACY_SSH_KEY_CHANGED_PRESERVED 1
-            else
-                atomic_copy "$LEGACY_STORE/JBLLocalSSH/$name" "$SSH_STORE/$name" || finish LEGACY_SSH_KEY_COPY_FAILED 1
-            fi
-        done
-    fi
     (cd "$STORE/ssh-input" && "$BB" sha256sum ./*.sh settings.conf password.hash > checksums.txt) || finish SSH_MANIFEST_FAILED 1
     ssh_mode=--managed
     [ "$keep_ssh" != true ] || ssh_mode=--managed-network-update

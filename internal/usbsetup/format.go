@@ -20,6 +20,68 @@ import (
 
 type formatJob struct{ ID, Identity, Package, Config, Confirm string }
 
+type formatResult struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// The elevated child cannot return its stderr through Windows Start-Process.
+// Write only a bounded result, never the private job/configuration. Exclusive
+// creation inside an os.Root prevents following a planted result-file symlink.
+func saveFormatResult(filename string, err error) {
+	root, e := os.OpenRoot(filepath.Dir(filename))
+	if e != nil {
+		return
+	}
+	defer root.Close()
+	f, e := root.OpenFile("result.json", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if e != nil {
+		return
+	}
+	defer f.Close()
+	result := formatResult{Success: err == nil}
+	if err != nil {
+		result.Error = err.Error()
+		if len(result.Error) > 2048 {
+			result.Error = result.Error[:2048]
+		}
+	}
+	data, _ := json.Marshal(result)
+	for len(data) > 4096 {
+		result.Error = result.Error[:len(result.Error)/2]
+		data, _ = json.Marshal(result)
+	}
+	_, _ = f.Write(data)
+}
+
+func readFormatResult(dir string, runErr error) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("USB preparation could not be confirmed: %w", err)
+	}
+	defer root.Close()
+	f, err := root.Open("result.json")
+	if err == nil {
+		defer f.Close()
+		info, statErr := f.Stat()
+		if statErr == nil && info.Mode().IsRegular() && info.Size() <= 4096 {
+			var result formatResult
+			if json.NewDecoder(io.LimitReader(f, 4097)).Decode(&result) == nil {
+				if !result.Success && result.Error != "" {
+					return fmt.Errorf("USB preparation failed; the drive may already be erased. Refresh drives before retrying. Details: %s", result.Error)
+				}
+				if result.Success && runErr == nil {
+					return nil
+				}
+			}
+		}
+	}
+	if runErr != nil {
+		return fmt.Errorf("USB preparation was cancelled or could not finish. Refresh drives to check its state before retrying: %w", runErr)
+	}
+	return errors.New("USB preparation could not be confirmed. Refresh drives and check the USB before retrying")
+}
+
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 func psQuote(s string) string    { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
@@ -75,15 +137,16 @@ func ElevatedPrepare(ctx context.Context, d Drive, pack, config string) error {
 		for _, a := range args {
 			parts = append(parts, strconv.Quote(a))
 		}
-		script := "$p=Start-Process -FilePath " + psQuote(exe) + " -ArgumentList " + psQuote(strings.Join(parts, " ")) + " -Verb RunAs -Wait -PassThru; exit $p.ExitCode"
+		script := "$ErrorActionPreference='Stop'; $p=Start-Process -FilePath " + psQuote(exe) + " -ArgumentList " + psQuote(strings.Join(parts, " ")) + " -Verb RunAs -Wait -PassThru; exit $p.ExitCode"
 		_, e = Run(ctx, "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-Command", script}, "")
-		return e
+		return readFormatResult(dir, e)
 	default:
 		return errors.New("formatting is unsupported on this platform")
 	}
 }
 
-func RunFormatJob(filename, digest string) error {
+func RunFormatJob(filename, digest string) (err error) {
+	defer func() { saveFormatResult(filename, err) }()
 	f, e := os.Open(filename)
 	if e != nil {
 		return e
@@ -148,7 +211,8 @@ func nativeFormat(ctx context.Context, d Drive, p *Package, config, platform str
 		if d.Size > 32<<30 {
 			size = "-Size 30GB"
 		}
-		script := fmt.Sprintf(`$ErrorActionPreference='Stop'; $d=Get-Disk -Number %s; if($d.BusType -ne 'USB' -or $d.IsBoot -or $d.IsSystem -or $d.IsReadOnly -or $d.Size -ne %d -or ([string]$d.SerialNumber).Trim() -ne %s){throw 'Disk is not an eligible USB'}; $d | Clear-Disk -RemoveData -RemoveOEM -Confirm:$false; Initialize-Disk -Number %s -PartitionStyle MBR; New-Partition -DiskNumber %s %s -AssignDriveLetter | Format-Volume -FileSystem FAT32 -NewFileSystemLabel JBLTOOLKIT -Confirm:$false | Out-Null`, d.Device, d.Size, psQuote(strings.TrimSpace(d.Serial)), d.Device, d.Device, size)
+		// Partition-style handling follows @VahaC's report/suggestion in #58.
+		script := fmt.Sprintf(`$ErrorActionPreference='Stop'; $d=Get-Disk -Number %s; if($d.BusType -ne 'USB' -or $d.IsBoot -or $d.IsSystem -or $d.IsReadOnly -or $d.Size -ne %d -or ([string]$d.SerialNumber).Trim() -ne %s){throw 'Disk is not an eligible USB'}; $d | Clear-Disk -RemoveData -RemoveOEM -Confirm:$false; $style=(Get-Disk -Number %s).PartitionStyle; if($style -eq 'RAW'){Initialize-Disk -Number %s -PartitionStyle MBR | Out-Null} elseif($style -ne 'MBR'){Set-Disk -Number %s -PartitionStyle MBR}; New-Partition -DiskNumber %s %s -AssignDriveLetter | Format-Volume -FileSystem FAT32 -NewFileSystemLabel JBLTOOLKIT -Confirm:$false | Out-Null`, d.Device, d.Size, psQuote(strings.TrimSpace(d.Serial)), d.Device, d.Device, d.Device, d.Device, size)
 		if _, e := run(ctx, "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-Command", script}, ""); e != nil {
 			return e
 		}

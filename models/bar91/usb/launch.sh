@@ -47,18 +47,22 @@ if [ "$ACTION" = check ] || [ "$ACTION" = verify ]; then
     "$BB" sync
     exit "$result"
 fi
-# One user action: update a managed installation, migrate the reviewed legacy
-# chain, or install on a clean bar. Unknown stores still fail identity checks.
+# Legacy state is never upgraded in place. Fresh replacement is explicit.
+# Keep recognizing the old action so an old config receives a useful refusal.
+if [ "$ACTION" = migrate ]; then
+    finish LEGACY_INSTALLATION_REQUIRES_FRESH_SETUP 1
+fi
+if [ "$ACTION" = reinstall ] && ! owned; then
+    /bin/sh "$USB/reinstall.sh" || exit 1
+fi
+# One user action: update a managed installation or install on a clean bar.
 if [ "$ACTION" = update ] && ! owned; then
     if [ -e "$SSH_STORE" ] || [ -L "$SSH_STORE" ] ||
        [ -e "$REMOTE_STORE" ] || [ -L "$REMOTE_STORE" ] ||
        [ -e "$STANDARD_STORE" ] || [ -L "$STANDARD_STORE" ] ||
        [ -e "$LEGACY_STORE" ] || [ -L "$LEGACY_STORE" ]; then
-        /bin/sh "$USB/migrate.sh" || exit 1
+        finish LEGACY_INSTALLATION_REQUIRES_FRESH_SETUP 1
     fi
-fi
-if [ "$ACTION" = migrate ]; then
-    /bin/sh "$USB/migrate.sh" || exit 1
 fi
 /bin/sh "$USB/manage.sh"
 result=$?

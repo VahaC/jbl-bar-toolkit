@@ -160,7 +160,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 							}
 						}
 						reports := map[string]string{}
-						for _, name := range []string{"STATUS.txt", "HARDWARE.txt", "CHECKS.txt", "PREFLIGHT.txt", "native-check.json", "setup.log"} {
+						for _, name := range []string{"STATUS.txt", "HARDWARE.txt", "CHECKS.txt", "PREFLIGHT.txt", "WIFI_STATUS.txt", "MIGRATION_CHECK.txt", "REINSTALL_CHECK.txt", "REINSTALL.txt", "VERIFY.txt", "native-check.json", "setup.log"} {
 							f, e := root.Open("JBLToolkit/" + name)
 							if e == nil {
 								if info, err := f.Stat(); err == nil && info.Size() > 65536 {

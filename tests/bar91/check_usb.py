@@ -261,7 +261,7 @@ exit 0
                 remote.mkdir(); ssh.mkdir()
                 shutil.copytree(ROOT / 'models/bar91/smart-mode/JBLInstall/payload', standard)
                 fixture = ROOT / 'tests/bar91/fixtures/legacy'
-                if migration.startswith('rev5'):
+                if migration.startswith('rev5') or migration == 'smart_only_rev5':
                     # Public v0.1.0 payload: rev5 owner, run.sh and once.sh; the rest equals rev6.
                     names = ('OWNER.txt', 'checksums.txt') if migration == 'rev5_with_rev6_scripts' else ('OWNER.txt', 'checksums.txt', 'run.sh', 'once.sh')
                     for name in names:
@@ -303,6 +303,25 @@ exit 0
                 if migration == 'unrelated_pid':
                     unrelated_migration = subprocess.Popen(['sleep', '60'])
                     (remote / 'remote.pid').write_text(str(unrelated_migration.pid))
+            if migration in ('smart_only_rev5', 'standard_ssh'):
+                shutil.rmtree(remote)
+                if migration == 'smart_only_rev5':
+                    shutil.rmtree(ssh)
+                    hook.write_bytes(base)
+                else:
+                    hook.write_bytes(ssh_hook)
+            if migration and ssh.exists():
+                (ssh / 'settings.conf').write_text('ALLOWED_PC=10.23.4.7\nINTERFACE=wlan0\nAUTOSTART=1\n')
+                (ssh / 'password.hash').write_text('legacy-password-must-not-be-imported\n')
+            if migration and remote.exists():
+                (remote / 'old-sound-settings.json').write_text('{"legacy":"must-not-be-imported"}')
+            def legacy_snapshot():
+                result = {}
+                for path in (root / 'var').rglob('*'):
+                    name = str(path.relative_to(root / 'var'))
+                    result[name] = ('link', os.readlink(path)) if path.is_symlink() else ('directory', '') if path.is_dir() else ('file', hashlib.sha256(path.read_bytes()).hexdigest())
+                return result
+            before_legacy = legacy_snapshot() if migration else None
             network_update = False
             def launch():
                 result = subprocess.run(['/bin/sh', str(usb / ('ssh-update.sh' if network_update else 'launch.sh'))], env=env,
@@ -312,6 +331,14 @@ exit 0
             try:
                 if label.startswith('ssh_reject_'):
                     env['JBL_TOOLKIT_TRANSPORT'] = 'ssh'
+                if migration and build_usb.parse_config((usb / 'config.txt').read_bytes())['ACTION'] == 'reinstall':
+                    requested = (usb / 'config.txt').read_bytes()
+                    (usb / 'config.txt').write_bytes(requested.replace(b'action=reinstall', b'action=check'))
+                    assert launch()[1] == 'CHECK_BLOCKED_READ_CHECKS'
+                    available = migration not in ('changed_script', 'changed_hook', 'symlink', 'rev5_with_rev6_scripts') and fail != 'preflight'
+                    assert ('REINSTALL_AVAILABLE=' + str(available).lower()) in (usb / 'REINSTALL_CHECK.txt').read_text()
+                    assert legacy_snapshot() == before_legacy, 'check modified the older installation'
+                    (usb / 'config.txt').write_bytes(requested)
                 result, status = launch()
                 if label.startswith('ssh_reject_'):
                     assert result.returncode != 0 and status == 'SSH_UPDATE_REQUIRES_MANAGED_INSTALLATION', status
@@ -319,38 +346,48 @@ exit 0
                     assert hook.read_bytes() == original
                     passed(label)
                     return
-                if migration:
+                if migration and build_usb.parse_config((usb / 'config.txt').read_bytes())['ACTION'] == 'reinstall':
                     if migration == 'missing_credentials':
-                        assert result.returncode != 0 and status == 'MIGRATION_SSH_CREDENTIALS_REQUIRED_NO_CHANGES', status
-                        assert not store.exists() and not archive.exists() and remote.exists() and ssh.exists() and standard.exists()
-                        assert hook.read_bytes() == web_hook and not (remote / 'DISABLED').exists()
+                        assert status == 'REINSTALL_SSH_CREDENTIALS_REQUIRED_NO_CHANGES', status
+                        assert legacy_snapshot() == before_legacy
                     elif migration in ('changed_script', 'changed_hook', 'symlink', 'rev5_with_rev6_scripts'):
-                        assert result.returncode != 0 and status == 'MIGRATION_IDENTITY_FAILED_NO_CHANGES', (status, (usb / 'setup.log').read_text())
-                        assert not store.exists() and not archive.exists() and remote.exists() and ssh.exists() and standard.exists()
-                        assert not (remote / 'DISABLED').exists()
-                        assert hook.read_bytes() == (web_hook + b'# external change\n' if migration == 'changed_hook' else web_hook)
+                        assert status == 'REINSTALL_IDENTITY_FAILED_NO_CHANGES', status
+                        assert legacy_snapshot() == before_legacy
+                    elif fail == 'preflight':
+                        assert status == 'REINSTALL_PREFLIGHT_FAILED_NO_CHANGES', status
+                        assert legacy_snapshot() == before_legacy
                     elif migration == 'unrelated_pid':
-                        assert status == 'MIGRATION_REMOTE_STOP_FAILED_REBOOT' and unrelated_migration.poll() is None, status
-                        assert hook.read_bytes() == web_hook and remote.exists() and not store.exists()
+                        assert status == 'REINSTALL_REMOTE_STOP_FAILED_REBOOT' and unrelated_migration.poll() is None, status
+                        assert hook.read_bytes() == web_hook
                         unrelated_migration.terminate(); unrelated_migration.wait(timeout=10)
                     else:
-                        assert result.returncode == 0 and status == 'INSTALLED_PENDING_REBOOT_TEST', (status, (usb / 'setup.log').read_text())
-                        assert (archive / 'RETIRED').exists() and not standard.exists()
+                        assert (archive / 'RETIRED').exists() and not standard.exists(), status
                         if migration == 'live_remote':
                             assert legacy_process.wait(timeout=10) == 0
-                        assert (archive / 'hook.legacy').read_bytes() == web_hook
-                        assert (archive / 'JBLRemote/start.sh').read_bytes() == (fixture / 'remote-start.sh').read_bytes()
-                        assert (ssh / 'host_ed25519').read_bytes() == b'fixture-private-host-key\n'
-                        assert (ssh / 'host_ed25519.pub').read_bytes() == b'fixture-existing-public-host-key\n'
-                        assert hook.read_bytes() == (store / 'hook.managed').read_bytes() and (store / 'hook.absent').exists()
-                        assert b'JBLStandard' not in hook.read_bytes()
-                        # Explicit migration reinsertion is passive after installation.
-                        pid = (remote / 'remote.pid').read_bytes()
-                        assert launch()[1] == 'ALREADY_INSTALLED_LOGS_EXPORTED'
-                        assert (remote / 'remote.pid').read_bytes() == pid
+                        if fail == 'ssh':
+                            assert result.returncode != 0 and status == 'SSH_INSTALL_FAILED' and (store / 'DISABLED').exists(), status
+                        else:
+                            assert result.returncode == 0 and status == 'INSTALLED_PENDING_REBOOT_TEST', (status, (usb / 'setup.log').read_text())
+                            assert (store / 'config.txt').read_bytes() == (usb / 'config.txt').read_bytes(), 'imported old configuration'
+                            assert (ssh / 'host_ed25519.pub').read_bytes() == b'fixture-public-host-key\n', 'imported old admin identity'
+                            assert not (remote / 'old-sound-settings.json').exists()
+                            assert b'legacy-password-must-not-be-imported' not in (store / 'ssh-input/password.hash').read_bytes()
+                            assert launch()[1] == 'ALREADY_INSTALLED_LOGS_EXPORTED'
                         (usb / 'RECOVER').touch()
                         assert launch()[1] == 'RECOVERED_REBOOT_REQUIRED'
                         assert not hook.exists() and (archive / 'RETIRED').exists()
+                    passed(label)
+                    return
+                if migration:
+                    assert result.returncode != 0 and status == 'LEGACY_INSTALLATION_REQUIRES_FRESH_SETUP', (status, (usb / 'setup.log').read_text())
+                    assert legacy_snapshot() == before_legacy, 'deprecated upgrade changed legacy files or hooks'
+                    assert not store.exists()
+                    if migration == 'live_remote':
+                        assert legacy_process.poll() is None, 'stopped a legacy process'
+                        legacy_process.terminate(); legacy_process.wait(timeout=10)
+                    if migration == 'unrelated_pid':
+                        assert unrelated_migration.poll() is None, 'stopped an unrelated process'
+                        unrelated_migration.terminate(); unrelated_migration.wait(timeout=10)
                     passed(label)
                     return
                 if build_usb.parse_config((usb / 'config.txt').read_bytes())['ACTION'] == 'check':
@@ -594,8 +631,12 @@ exit 0
                         pass
 
     for migration in ('complete', 'resume', 'live_remote', 'changed_script', 'changed_hook', 'symlink', 'unrelated_pid', 'missing_credentials', 'rev5', 'rev5_with_rev6_scripts'):
-        scenario('legacy_migration_' + migration, config=changed(action='migrate'), migration=migration)
-    scenario('automatic_legacy_update', config=changed(action='update'), migration='complete')
+        scenario('deprecated_legacy_migration_preserved_' + migration, config=changed(action='migrate'), migration=migration)
+    scenario('legacy_update_requires_fresh_setup', config=changed(action='update'), migration='complete')
+    for legacy_case in ('complete', 'smart_only_rev5', 'standard_ssh', 'rev5', 'resume', 'live_remote', 'changed_script', 'changed_hook', 'symlink', 'unrelated_pid', 'missing_credentials', 'rev5_with_rev6_scripts'):
+        scenario('fresh_reinstall_' + legacy_case, config=changed(action='reinstall'), migration=legacy_case)
+    scenario('fresh_reinstall_preflight_failure', config=changed(action='reinstall'), migration='complete', fail='preflight')
+    scenario('fresh_reinstall_install_failure_recovery', config=changed(action='reinstall'), migration='complete', fail='ssh')
     scenario('automatic_clean_update', config=changed(action='update',ssh='false'))
     for update in ('complete','runtime_corrupt','hook_changed','bad_usb','bad_credentials','preflight_failure','start_failure'):
         scenario('usb_update_' + update, config=changed(ssh='true'))

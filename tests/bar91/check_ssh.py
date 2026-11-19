@@ -168,8 +168,23 @@ def address_tests():
     with tempfile.TemporaryDirectory(prefix="jbl-ssh-lan-") as tmp:
         folder = Path(tmp)
         wrapper = folder / "busybox"
-        wrapper.write_text("#!/bin/sh\nif [ \"$1\" = ip ]; then printf '%s\\n' \"$JBL_FIXTURE_IPS\"; else exec " + BB + " \"$@\"; fi\n")
+        wrapper.write_text('''#!/bin/sh
+case "$*" in
+    'ip -o link show up')
+        [ "${JBL_FIXTURE_LINK_FAILURE:-0}" != 1 ] || exit 1
+        printf '%s\\n' "$JBL_FIXTURE_LINKS";;
+    "ip "*) printf '%s\\n' "$JBL_FIXTURE_IPS";;
+    *) exec ''' + BB + ''' "$@";;
+esac
+''')
         wrapper.chmod(0o700)
+        links = "\n".join((
+            "7: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500",
+            "2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500",
+            "1: ap0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500",
+            "3: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536",
+            "4: p2p0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500",
+        ))
         tests = (
             ("10.23.4.7", "10.23.5.20/16", "10.23.5.20"),
             ("10.23.4.7", "10.23.5.20/24", ""),
@@ -185,10 +200,55 @@ def address_tests():
         )
         for pc, cidr, expected in tests:
             env = dict(os.environ, JBL_BUSYBOX=str(wrapper), ALLOWED_PC=pc, INTERFACE="wlan0",
+                       JBL_FIXTURE_LINKS=links,
                        JBL_FIXTURE_IPS="7: wlan0 inet " + cidr + " scope global wlan0")
             result = run(["/bin/sh", "-c", '. "$1"; find_address', "fixture", str(ROOT / "models/bar91/ssh/common.sh")], env=env)
             assert result.returncode == 0 and result.stdout.strip() == expected, (pc, cidr, result.stdout, result.stderr)
         passed("actual_subnet_address_selection_excludes_public_other_lan_and_pc")
+        multi = "\n".join((
+            "7: wlan0 inet 192.168.1.40/24 scope global wlan0",
+            "2: eth0 inet 192.168.1.20/24 scope global eth0",
+            "2: eth0 inet 192.168.1.9/24 scope global eth0",
+            "1: ap0 inet 192.168.1.2/24 scope global ap0",
+            "3: lo inet 192.168.1.1/24 scope global lo",
+            "4: p2p0 inet 192.168.1.3/24 scope global p2p0",
+        ))
+        for interface, addresses, expected in (
+            ("auto", multi, "192.168.1.9"),
+            ("auto", "\n".join(reversed(multi.splitlines())), "192.168.1.9"),
+            ("wlan0", multi, "192.168.1.40"),
+            ("auto", multi.splitlines()[0], "192.168.1.40"),
+            ("auto", multi.splitlines()[1], "192.168.1.20"),
+            ("auto", "2: eth0 inet 192.168.2.9/24 scope global eth0", ""),
+            ("auto", "1: ap0 inet 192.168.1.2/24 scope global ap0", ""),
+            ("auto", "", ""),
+        ):
+            env = dict(os.environ, JBL_BUSYBOX=str(wrapper), ALLOWED_PC="192.168.1.0/24",
+                       INTERFACE=interface, JBL_FIXTURE_IPS=addresses, JBL_FIXTURE_LINKS=links)
+            result = run(["/bin/sh", "-c", '. "$1"; find_address', "fixture", str(ROOT / "models/bar91/ssh/common.sh")], env=env)
+            assert result.returncode == 0 and result.stdout.strip() == expected, (interface, addresses, result.stdout, result.stderr)
+        passed("auto_lan_selection_wired_wifi_stable_order_hotspot_exclusion_and_explicit_override")
+        disconnected = links.replace(
+            "eth0: <BROADCAST,MULTICAST,UP,LOWER_UP>",
+            "eth0: <NO-CARRIER,BROADCAST,MULTICAST,UP>",
+        )
+        for label, interface, current_links, addresses, expected in (
+            ("wired_no_carrier", "auto", disconnected, multi, "192.168.1.40"),
+            ("explicit_wired_no_carrier", "eth0", disconnected, multi, ""),
+            ("wired_no_carrier_only", "auto", disconnected, multi.splitlines()[1], ""),
+            ("wired_dormant", "auto", links.replace("eth0: <BROADCAST", "eth0: <DORMANT,BROADCAST"), multi, "192.168.1.40"),
+            ("wired_admin_down", "auto", links.replace("eth0: <BROADCAST,MULTICAST,UP,LOWER_UP>", "eth0: <BROADCAST,MULTICAST,LOWER_UP>"), multi, "192.168.1.40"),
+            ("missing_link_state", "auto", "", multi, ""),
+            ("link_query_failed", "auto", links, multi, ""),
+            ("linked_interface_name", "auto", links.replace("eth0:", "eth0@if8:"), multi.replace("eth0 inet", "eth0@if8 inet"), "192.168.1.9"),
+            ("wired_reconnected", "auto", links, multi, "192.168.1.9"),
+        ):
+            env = dict(os.environ, JBL_BUSYBOX=str(wrapper), ALLOWED_PC="192.168.1.0/24",
+                       INTERFACE=interface, JBL_FIXTURE_IPS=addresses, JBL_FIXTURE_LINKS=current_links,
+                       JBL_FIXTURE_LINK_FAILURE=str(int(label == "link_query_failed")))
+            result = run(["/bin/sh", "-c", '. "$1"; find_address', "fixture", str(ROOT / "models/bar91/ssh/common.sh")], env=env)
+            assert result.returncode == 0 and result.stdout.strip() == expected, (label, result.stdout, result.stderr)
+        passed("lan_selection_requires_operational_link_despite_retained_addresses")
 
 
 def installer_tests():

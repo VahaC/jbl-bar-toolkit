@@ -196,6 +196,12 @@ pre {
   display: flex;
   gap: 10px;
 }
+.view-choice {display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;color:var(--muted);font-size:12px}
+#guidance {border-left:2px solid var(--teal);padding-left:14px;margin:16px 0}
+#guidance-text {color:var(--teal);overflow-wrap:anywhere}
+#selected-action {color:var(--orange);font-weight:600}
+#settings-summary {color:#ececf0}
+@media(max-width:500px){.view-choice{align-items:start;flex-direction:column}}
 .actions:empty {
   display: none;
 }

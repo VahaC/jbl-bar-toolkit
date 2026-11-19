@@ -14,6 +14,88 @@
     rows = [],
     selected = null;
   let method = "usb", sshTicket = "", sshFingerprint = "";
+  const drafts = new Map();
+  const fields = ["web", "ssh", "standard", "memory", "action", "address", "prefix", "web-port"];
+  let initialNetwork = null, recommendation = null;
+  function saveDraft() {
+    if (!selected) return;
+    drafts.set(selected.drive.id, Object.fromEntries(fields.map(id =>
+      [id, $(id).type === "checkbox" ? $(id).checked : $(id).value])));
+  }
+  function viewControls(all) {
+    $("all-controls").setAttribute("aria-pressed", String(all));
+    $("all-controls").textContent = all ? "Use guided controls" : "Show all controls";
+    for (const el of document.querySelectorAll("details[data-controls]")) el.open = all;
+    revealRequired();
+  }
+  function revealRequired() {
+    if (!$("address").value) {
+      $("custom-settings").open = true;
+      $("network-settings").open = true;
+    }
+    if ($("ssh").checked && !selected?.hasSSH && !$("password").value) {
+      $("usb-access").open = true;
+    }
+    if ($("format").checked || selected?.drive && !selected.drive.eligible) $("format-options").open = true;
+  }
+  $("all-controls").onclick = () => viewControls($("all-controls").getAttribute("aria-pressed") !== "true");
+  // Recommendations only select an action. Preparing/erasing always needs its
+  // own explicit submission and the existing host/device guards.
+  $("use-recommendation").onclick = () => {
+    if (!recommendation || busy) return;
+    $("action").value = recommendation;
+    state(); saveDraft();
+    $("prepare").focus();
+  };
+  $("recover-recommendation").onclick = () => {
+    if (busy) return;
+    $("action").value = "uninstall";
+    state(); saveDraft();
+    $("prepare").focus();
+  };
+  function guidance() {
+    const reports = selected?.reports || {};
+    const status = (reports["STATUS.txt"] || "").split("\n")[0].trim();
+    const messages = {
+      "": ["check", "Check compatibility before installing. Return the USB here after the soundbar finishes."],
+      CHECK_PASSED_READY_FOR_INSTALL_OR_CONFIGURE: ["update", "Compatibility check passed. You can install or update using this USB."],
+      INSTALLED_PENDING_REBOOT_TEST: ["verify", "Installed. Remove the USB, unplug the bar for 60 seconds, then restart it. Afterward, prepare verification."],
+      VERIFIED_CURRENT_BOOT_PENDING_USER_TESTS: [null, "Restart verified. Check playback, volume and standby; keep your USB and recovery ZIP."],
+      ALREADY_INSTALLED_LOGS_EXPORTED: ["configure", "Already installed. Reports are ready; choose configuration changes if you want to edit settings."],
+      WIFI_SETUP_INCOMPLETE: ["configure", "Wi-Fi setup failed. Correct the network under Customize settings, then apply configuration changes with the original USB."],
+      TOOLKIT_DISABLED_USE_CONFIGURE_OR_RECOVER: ["configure", "The toolkit is disabled. Fix the cause shown in the reports, then apply configuration changes with the original USB, or choose Uninstall to recover."],
+      CHECK_BLOCKED_READ_CHECKS: [null, "Compatibility check blocked. Read the technical details and resolve the reported cause before installing."],
+      VERIFICATION_INCOMPLETE_READ_VERIFY: ["verify", "Restart verification is incomplete. Read VERIFY.txt below and resolve its reported checks before preparing verification again."],
+      RECOVERED_REBOOT_REQUIRED: [null, "Toolkit disabled and recovery completed. Remove the USB and restart the bar."],
+      PACKAGE_VERSION_CONFLICT_USE_ORIGINAL_USB: [null, "This package does not match the bar. Restore the original USB backup or use the matching recovery ZIP."],
+      BOOTSTRAP_FILE_MISSING_OR_UNSAFE: [null, "Required USB files are missing or unsafe. Restore the original USB backup; do not delete recover.sh."],
+      LEGACY_INSTALLATION_REQUIRES_FRESH_SETUP: [null, "An older standalone installation was found. Remove it using the older-installation guide, restart the bar, then install fresh."],
+      REINSTALL_IDENTITY_FAILED_NO_CHANGES: [null, "The older setup was not recognized. Nothing was removed. Use the older-installation guide and keep the original files."],
+      REINSTALL_SSH_CREDENTIALS_REQUIRED_NO_CHANGES: ["reinstall", "Choose an admin password for the fresh installation before replacing the older setup. Nothing was removed."],
+      REINSTALL_PREFLIGHT_FAILED_NO_CHANGES: [null, "The replacement compatibility check failed. Nothing was removed. Read the technical details before continuing."],
+      REINSTALL_REMOTE_STOP_FAILED_REBOOT: [null, "Replacement stopped while shutting down the old services. Keep this USB, restart the bar and run a compatibility check before continuing."],
+    };
+    const replaceable = /^REINSTALL_AVAILABLE=true$/m.test(reports["REINSTALL_CHECK.txt"] || "");
+    const known = replaceable && ["CHECK_BLOCKED_READ_CHECKS", "LEGACY_INSTALLATION_REQUIRES_FRESH_SETUP"].includes(status)
+      ? ["reinstall", "An older setup can be replaced automatically. Review your new settings and admin password first. Replacement removes the old services and starts fresh; their files stay in a private backup."]
+      : messages[status];
+    recommendation = known?.[0] || null;
+    let text = known?.[1] || "The soundbar could not finish this step. Read the technical details before retrying; use the original USB and matching recovery ZIP.";
+    if (status === "WIFI_SETUP_INCOMPLETE") {
+      const reason = (reports["WIFI_STATUS.txt"] || "").split("\n")[0].trim();
+      const reasons = {WIFI_NOT_CONNECTED:"Check the Wi-Fi name, password and signal; use a visible 2.4 GHz or mixed-band network.", INVALID_SSID:"The Wi-Fi name was rejected.", INVALID_PSK:"The Wi-Fi key was rejected."};
+      if (reasons[reason]) text += " " + reasons[reason];
+    }
+    $("guidance").hidden = !selected;
+    $("guidance-text").textContent = text;
+    $("legacy-help").hidden = !replaceable && !status.startsWith("REINSTALL_") && status !== "LEGACY_INSTALLATION_REQUIRES_FRESH_SETUP" && !(reports["CHECKS.txt"] || "").includes("LEGACY_INSTALLATION_REQUIRES_FRESH_SETUP");
+    $("use-recommendation").hidden = !recommendation;
+    $("recover-recommendation").hidden = status !== "TOOLKIT_DISABLED_USE_CONFIGURE_OR_RECOVER";
+    if (recommendation) {
+      const option = [...$("action").options].find(o => o.value === recommendation);
+      $("use-recommendation").textContent = "Next: " + option.textContent.trim();
+    }
+  }
   async function api(path, body, onProgress) {
     const response = await fetch("/api/" + path, {
       method: body === undefined ? "GET" : "POST",
@@ -73,6 +155,14 @@
     $("saved-password").hidden = !selected?.hasSSH;
     $("memory").disabled = busy || !$("standard").checked;
     if (!$("standard").checked) $("memory").checked = false;
+    $("all-controls").disabled = busy;
+    $("use-recommendation").disabled = busy;
+    $("use-recommendation").hidden = !recommendation || $("action").value === recommendation;
+    $("recover-recommendation").disabled = busy;
+    $("selected-action").textContent = "Next: " + $("action").selectedOptions[0].textContent.trim();
+    if ($("action").value === "reinstall") $("selected-action").textContent += " — old settings and admin identity will be replaced; files are backed up.";
+    const features = [$("web").checked && "Browser remote", $("standard").checked && ($("memory").checked ? "Remember sound mode" : "Standard Mode after wake"), $("ssh").checked && "Remote admin access"].filter(Boolean);
+    $("settings-summary").textContent = features.join(" · ") || "All toolkit services disabled.";
     $("prepare").disabled =
       busy ||
       restartNeeded ||
@@ -108,16 +198,25 @@
       $("network").textContent =
         "Allowed home network: " +
         JBLSetup.subnet($("address").value, $("prefix").value);
+      $("network-summary").textContent = $("network").textContent;
     } catch {
       $("network").textContent =
         "Use your computer’s private IPv4 address on the soundbar’s home network.";
+      $("network-summary").textContent = "Choose the network shared by your computer and soundbar.";
     }
   }
   function select() {
+    const previous = selected?.drive.id;
+    const chosenNetwork = !previous && $("address").value
+      ? {address: $("address").value, prefix: $("prefix").value} : initialNetwork;
+    saveDraft();
     selected = rows.find((row) => row.drive.id === $("drive").value) || null;
+    if (previous !== selected?.drive.id) {
+      for (const id of ["password", "wifiPassword", "ssid"]) $(id).value = "";
+    }
     const d = selected?.drive;
     $("drive-status").textContent = d
-      ? (d.eligible ? "Ready · first FAT32 partition on MBR" : d.reason) +
+      ? (d.eligible ? "USB ready" : d.reason) +
         (selected.config ? " · Existing toolkit configuration found" : "")
       : "Insert a USB and select it above.";
     $("reports").hidden =
@@ -126,7 +225,6 @@
       .map(([name, text]) => name + "\n" + text)
       .join("\n\n");
     const status = (selected?.reports?.["STATUS.txt"] || "").split("\n")[0].trim();
-    if (status) $("drive-status").textContent += " · Last soundbar result: " + status;
     if (/FAILED|BLOCKED/.test(status)) {
       try {
         const native = JSON.parse(selected.reports["native-check.json"] || "{}");
@@ -138,8 +236,20 @@
     }
     $("confirm").value = "";
     $("format").checked = false;
+    $("format-advice").textContent = !d || d.eligible
+      ? "Formatting is not needed for an eligible USB."
+      : d.readOnly ? "This drive is read-only. Use a writable USB."
+      : "This USB is not ready: " + d.reason + ". Formatting may be needed and erases the entire drive.";
     const cfg = selected?.config;
+    // Saved USB configuration supplies initial values; in-session edits win.
+    $("web").checked = true; $("standard").checked = true;
+    $("ssh").checked = true; $("memory").checked = false;
+    $("action").value = "check";
+    $("web-port").value = "80";
+    $("address").value = chosenNetwork?.address || "";
+    $("prefix").value = String(chosenNetwork?.prefix || 24);
     if (cfg) {
+      $("web-port").value = cfg.web_port || "80";
       for (const [field, key] of [
         ["web", "web_remote"],
         ["ssh", "ssh"],
@@ -155,6 +265,13 @@
         network();
       }
     }
+    const draft = drafts.get(selected?.drive.id);
+    if (draft) for (const id of fields) {
+      if ($(id).type === "checkbox") $(id).checked = draft[id];
+      else $(id).value = draft[id];
+    }
+    if (!$("action").value) $("action").value = "check";
+    network(); guidance(); revealRequired();
     state();
   }
   async function refresh() {
@@ -269,8 +386,17 @@
       $("address").value = option.value;
       $("prefix").value = option.dataset.prefix;
       network();
+    } else {
+      $("network-settings").open = true;
     }
   };
+  $("wizard").addEventListener("change", () => { state(); saveDraft(); revealRequired(); });
+  $("wizard").addEventListener("input", saveDraft);
+  $("wizard").addEventListener("invalid", event => {
+    for (let parent = event.target.parentElement; parent; parent = parent.parentElement) {
+      if (parent.tagName === "DETAILS") parent.open = true;
+    }
+  }, true);
   $("refresh").onclick = async () => {
     working(true);
     try {
@@ -325,6 +451,7 @@
       return;
     }
     working(true);
+    $("prepare-details").hidden = true;
     message(
       format
         ? "Preparing USB. Approve the system administrator prompt to format the selected drive. Do not disconnect it."
@@ -336,7 +463,7 @@
       let config = await JBLSetup.configuration({
         address: $("address").value,
         prefix: $("prefix").value,
-        port: selected.config?.web_port ?? 80,
+        port: $("web-port").value,
         action: $("action").value,
         web: $("web").checked,
         ssh: $("ssh").checked && !keepSSH,
@@ -359,7 +486,9 @@
       $("wifiPassword").value = "";
       await refresh();
     } catch (e) {
-      message(e.message, true);
+      message("USB preparation did not finish. Refresh drives and check its state before retrying.", true);
+      $("prepare-error").textContent = e.message;
+      $("prepare-details").hidden = false;
     } finally {
       working(false);
     }
@@ -385,11 +514,14 @@
         option.dataset.prefix = n.prefix;
         $("network-select").add(option);
       }
-      if (data.networks.length) {
+      if (data.networks.length === 1) {
+        initialNetwork = data.networks[0];
         $("network-select").value = data.networks[0].address;
         $("address").value = data.networks[0].address;
         $("prefix").value = String(data.networks[0].prefix);
         network();
+      } else {
+        $("network-select").options[0].textContent = data.networks.length ? "Choose your home network…" : "Enter manually";
       }
       await refresh();
     } catch (e) {

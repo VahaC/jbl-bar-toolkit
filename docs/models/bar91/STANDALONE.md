@@ -1,6 +1,8 @@
 # Standalone installers and control reference
 
-For the new combined USB installer, start with the [toolkit guide](USB-TOOLKIT.md). This page preserves the separate installers and detailed control reference.
+**Historical installation paths; current control reference.** For new installations, use the combined toolkit.
+
+For the combined USB installer, start with the [toolkit guide](USB-TOOLKIT.md). This page preserves the separate installers and detailed control reference.
 
 Control playback and tune Front EQ from a browser, disable Smart Mode automatically after wake, or enable root SSH for further development. Each tool runs on the bar; no ongoing computer service is required.
 

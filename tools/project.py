@@ -42,8 +42,8 @@ def configuration(model: str, subnet: str, features: str, action: str) -> bytes:
     selected = set(features.split(','))
     if not selected or '' in selected or not selected.issubset(item['install_features']):
         raise ValueError('Choose comma-separated features: ' + ','.join(item['install_features']))
-    if action not in ('check', 'install', 'migrate', 'update'):
-        raise ValueError('Preparation action must be check, install, migrate or update')
+    if action not in ('check', 'install', 'reinstall', 'update'):
+        raise ValueError('Preparation action must be check, install, reinstall or update')
     import build_usb
     text = ('format=1\naction=' + action + '\nssh=' + str('ssh' in selected).lower() +
             '\nweb_remote=' + str('web' in selected).lower() +
@@ -104,8 +104,8 @@ def prepare(args) -> int:
     print('Next steps:', ROOT / 'docs/models/bar91/USB-TOOLKIT.md')
     if settings['ACTION'] == 'check':
         print('First run is check-only. Inspect the returned reports before installation.')
-    elif settings['ACTION'] == 'migrate':
-        print('This run retires the exact reviewed legacy chain and installs the toolkit. Allow five minutes.')
+    elif settings['ACTION'] == 'reinstall':
+        print('This run removes a recognized older setup and installs fresh settings and admin credentials. Old files are backed up. Allow five minutes.')
     else:
         print('This run installs selected features. Allow five minutes, then verify a USB-free restart.')
     if args.mount:
@@ -127,7 +127,7 @@ def main(argv=None) -> int:
     build.add_argument('--config', type=Path, help='Local config with settings and optional credentials')
     build.add_argument('--allowed-cidr', help='Your actual trusted LAN subnet')
     build.add_argument('--features', help='web,ssh,auto-standard,smart-mode-memory (default: web)')
-    build.add_argument('--action', choices=('check', 'install', 'migrate', 'update'), help='Default: check')
+    build.add_argument('--action', choices=('check', 'install', 'reinstall', 'update'), help='Default: check; reinstall replaces known older setups without importing settings')
     build.add_argument('--mount', type=Path)
     build.add_argument('--output-dir', type=Path)
     build.add_argument('--ssh-password-hash-file', type=Path)

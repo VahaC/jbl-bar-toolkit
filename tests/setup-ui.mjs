@@ -9,7 +9,8 @@ const token = "browser-fixture-session",
   requests = [],
   errors = [],
   external = [];
-let existing = false, nativeFailure = false;
+let existing = false, nativeFailure = false, reportStatus = null, prepareFailure = false, replaceable = false;
+let networks = [{ address: "192.168.9.138", prefix: 27 }];
 let sshTrusted = false, sshCurrent = false, sshFailure = false, sshInterrupted = false;
 const fingerprint = "SHA256:fixture-public-speaker-host-key-0123456789abc";
 const drive = {
@@ -35,7 +36,7 @@ const server = createServer(async (req, res) => {
           result = {
             version: "0.3.0-dev.9",
             packageVersion: "",
-            networks: [{ address: "192.168.9.138", prefix: 27 }],
+            networks,
             canUpdateSelf: true,
             hasRecovery: false,
           };
@@ -60,7 +61,11 @@ const server = createServer(async (req, res) => {
                 : {}),
               reports: {
                 "STATUS.txt":
-                  nativeFailure ? "PREFLIGHT_FAILED_CHECK_FIRMWARE_STORAGE_AND_NATIVE_SSH" : "CHECK_PASSED_READY_FOR_INSTALL_OR_CONFIGURE\n<script>window.injected=true</script>",
+                  reportStatus ?? (nativeFailure ? "PREFLIGHT_FAILED_CHECK_FIRMWARE_STORAGE_AND_NATIVE_SSH" : "CHECK_PASSED_READY_FOR_INSTALL_OR_CONFIGURE\n<script>window.injected=true</script>"),
+                "WIFI_STATUS.txt": "WIFI_NOT_CONNECTED\n",
+                "VERIFY.txt": "Fixture restart checks",
+                "MIGRATION_CHECK.txt": "MIGRATION_ELIGIBLE=true\n",
+                "REINSTALL_CHECK.txt": "REINSTALL_AVAILABLE=" + replaceable + "\n",
  "native-check.json": JSON.stringify(nativeFailure ? {power:"Standby",error:"turn the soundbar fully on before installation"} : {}),
               },
             },
@@ -74,6 +79,10 @@ const server = createServer(async (req, res) => {
           };
           break;
         case "/api/prepare":
+          if (prepareFailure) {
+            res.writeHead(400, {"Content-Type":"application/json"}).end(JSON.stringify({error:"Format-Volume failed after Clear-Disk; the USB may already be erased."}));
+            return;
+          }
           existing = body.Config.includes("ssh=true");
           result = { message: "USB written and read back successfully." };
           break;
@@ -164,6 +173,11 @@ try {
   );
   assert.equal(await page.locator("#drive").inputValue(), "");
   assert.equal(await page.locator("#prepare").isDisabled(), true);
+  assert.equal(await page.locator("#all-controls").getAttribute("aria-pressed"), "false");
+  assert.equal(await page.locator("#custom-settings").evaluate(el => el.open), false);
+  assert.equal(await page.locator("#standard").isChecked(), true);
+  assert.equal(await page.locator("#web").isChecked(), true);
+  assert.equal(await page.locator("#ssh").isChecked(), true);
   assert.equal(await page.locator("#action").inputValue(), "check");
   assert.equal(await page.locator("#prefix").inputValue(), "27");
   assert.match(
@@ -175,6 +189,37 @@ try {
   await page.locator("#reports").evaluate((el) => (el.open = true));
   assert.match(await page.locator("#reports-text").textContent(), /<script>/);
   assert.equal(await page.evaluate(() => window.injected), undefined);
+  const beforeRecommendations = requests.filter(r => r.path === "/api/prepare").length;
+  for (const [status, action] of [
+    ["CHECK_PASSED_READY_FOR_INSTALL_OR_CONFIGURE", "update"],
+    ["INSTALLED_PENDING_REBOOT_TEST", "verify"],
+    ["WIFI_SETUP_INCOMPLETE", "configure"],
+    ["TOOLKIT_DISABLED_USE_CONFIGURE_OR_RECOVER", "configure"],
+  ]) {
+    reportStatus = status;
+    await page.locator("#refresh").click();
+    await page.waitForFunction(status => document.querySelector("#reports-text").textContent.includes(status), status);
+    if (await page.locator("#use-recommendation").isVisible()) await page.locator("#use-recommendation").click();
+    assert.equal(await page.locator("#action").inputValue(), action);
+  }
+  await page.locator("#recover-recommendation").click();
+  assert.equal(await page.locator("#action").inputValue(), "uninstall");
+  reportStatus = "UNRECOGNIZED_FAILURE";
+  await page.locator("#refresh").click();
+  await page.waitForFunction(() => document.querySelector("#reports-text").textContent.includes("UNRECOGNIZED_FAILURE"));
+  assert.equal(await page.locator("#use-recommendation").isHidden(), true);
+  assert.match(await page.locator("#guidance-text").textContent(), /before retrying/);
+  assert.equal(requests.filter(r => r.path === "/api/prepare").length, beforeRecommendations);
+  replaceable = true;
+  reportStatus = "CHECK_BLOCKED_READ_CHECKS";
+  await page.locator("#refresh").click();
+  await page.waitForFunction(() => document.querySelector("#guidance-text").textContent.includes("replaced automatically"));
+  await page.locator("#use-recommendation").click();
+  assert.equal(await page.locator("#action").inputValue(), "reinstall");
+  assert.match(await page.locator("#selected-action").textContent(), /old settings and admin identity/);
+  assert.equal(requests.filter(r => r.path === "/api/prepare").length, beforeRecommendations);
+  replaceable = false;
+  reportStatus = null;
   nativeFailure = true;
   await page.locator("#refresh").click();
   await page.waitForFunction(() => document.getElementById("drive-status").textContent.includes("turn the soundbar fully on before installation"));
@@ -182,7 +227,12 @@ try {
   nativeFailure = false;
   await page.locator("#refresh").click();
   await page.waitForFunction(() => !document.getElementById("drive-status").textContent.includes("turn the soundbar fully on before installation"));
-
+  await page.locator("#all-controls").click();
+  await page.locator("#action").selectOption("check");
+  await page.locator("#standard").uncheck();
+  await page.locator("#all-controls").click();
+  assert.equal(await page.locator("#standard").isChecked(), false);
+  await page.locator("#all-controls").click();
   await page
     .locator("#usb-access")
     .evaluate((el) => (el.open = true));
@@ -216,6 +266,7 @@ try {
     () => !document.querySelector("#saved-password").hidden,
   );
   await page.locator("#ssid").fill("");
+  await page.locator("#web-port").fill("8080");
   await page.locator("#action").selectOption("configure");
   await page.locator("#prepare").click();
   await page.waitForFunction(
@@ -239,6 +290,13 @@ try {
   const third = requests.filter((r) => r.path === "/api/prepare")[2].body;
   assert.equal(third.Format, true);
   assert.equal(third.Confirm, "ERASE /dev/fixture");
+  prepareFailure = true;
+  await page.locator("#prepare").click();
+  await page.waitForFunction(() => document.querySelector("#result").dataset.error === "true");
+  assert.match(await page.locator("#result").textContent(), /check its state before retrying/);
+  assert.equal(await page.locator("#prepare-details").isVisible(), true);
+  assert.match(await page.locator("#prepare-error").textContent(), /Format-Volume failed after Clear-Disk/);
+  prepareFailure = false;
   for (const width of [320, 390, 650, 900, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     assert(
@@ -321,6 +379,28 @@ try {
   assert.equal(await page.locator("#self-update").isHidden(), true);
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);
+  // A new session loads existing values; it never replaces them with fresh defaults.
+  const returning = await browser.newPage();
+  await returning.goto(origin + "/#" + token);
+  await returning.waitForFunction(() => document.querySelector("#drive").options.length > 1);
+  await returning.locator("#drive").selectOption("fixture");
+  assert.equal(await returning.locator("#web-port").inputValue(), "8080");
+  assert.equal(await returning.locator("#memory").isChecked(), true);
+  assert.equal(await returning.locator("#ssh").isChecked(), true);
+  await returning.close();
+  // Multiple networks require a choice; a detected first entry is not a guess.
+  existing = false;
+  networks.push({address:"10.0.0.20",prefix:24});
+  const ambiguous = await browser.newPage();
+  await ambiguous.goto(origin + "/#" + token);
+  await ambiguous.waitForFunction(() => document.querySelector("#network-select").options.length === 3);
+  assert.equal(await ambiguous.locator("#address").inputValue(), "");
+  assert.equal(await ambiguous.locator("#network-settings").evaluate(el => el.open), true);
+  await ambiguous.locator("#network-select").selectOption("10.0.0.20");
+  assert.equal(await ambiguous.locator("#address").inputValue(), "10.0.0.20");
+  await ambiguous.locator("#drive").selectOption("fixture");
+  assert.equal(await ambiguous.locator("#address").inputValue(), "10.0.0.20");
+  await ambiguous.close();
   console.log(
     "Portable setup browser: PASS (USB, SSH discovery/credentials/trust/update/errors, downloads, self-update, responsive layouts)",
   );

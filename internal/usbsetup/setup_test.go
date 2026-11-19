@@ -268,6 +268,30 @@ func TestDriveListingPreservesCustomWebPort(t *testing.T) {
 		t.Fatalf("custom port missing from drive listing: %s", w.Body.String())
 	}
 }
+
+func TestDriveListingIncludesActionReportsWithoutCredentials(t *testing.T) {
+	s, d := testServer(t)
+	if err := os.MkdirAll(filepath.Join(d.Mount, "JBLToolkit"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{
+		"WIFI_STATUS.txt": "WIFI_NOT_CONNECTED", "VERIFY.txt": "CURRENT_BOOT=passed", "REINSTALL_CHECK.txt": "REINSTALL_AVAILABLE=true",
+		"config.txt": "PRIVATE_WIFI_SECRET", "password.hash": "PRIVATE_SSH_SECRET",
+	} {
+		if err := os.WriteFile(filepath.Join(d.Mount, "JBLToolkit", name), []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := call(s, "GET", "/api/drives", nil, true)
+	for _, name := range []string{"WIFI_STATUS.txt", "VERIFY.txt", "REINSTALL_CHECK.txt"} {
+		if !strings.Contains(w.Body.String(), name) {
+			t.Fatal("missing report", name)
+		}
+	}
+	if strings.Contains(w.Body.String(), "PRIVATE_") {
+		t.Fatal("exported private files")
+	}
+}
 func TestLinuxDiscovery(t *testing.T) {
 	data := []byte(`{"blockdevices":[{"name":"/dev/sda","type":"disk","tran":"usb","rm":true,"ro":false,"size":8000000000,"serial":"one","pttype":"dos","log-sec":512,"children":[{"name":"/dev/sda1","type":"part","partn":1,"fstype":"vfat","fsver":"FAT32","mountpoints":["/media/user/USB"]}]},{"name":"/dev/sdb","type":"disk","tran":"usb","rm":true,"size":8000000000,"log-sec":512,"children":[{"mountpoints":["/"]}]},{"name":"/dev/nvme0n1","type":"disk","tran":"nvme","rm":false}]}`)
 	ds, e := linuxDrives(data)
