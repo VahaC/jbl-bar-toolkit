@@ -4,6 +4,15 @@ User-facing changes go here. Before publishing another release, change the root
 `VERSION` file and add a matching `## <version>` section. Release notes are
 generated from that section plus the installation and recovery instructions.
 
+## 0.3.0-dev.12
+
+- Fix Windows USB preparation for already initialized disks and show detailed failures from elevated formatting.
+- Select an active Ethernet or Wi-Fi connection for SSH access and `jbl.local` discovery, skipping disconnected interfaces with stale addresses.
+- Guide USB setup using returned installation reports and recommend remote admin access for future network updates.
+- **Breaking change:** replace recognized older standalone installations through an explicit clean reinstall with new settings, credentials and host identity. In-place migration is disabled; retain the original recovery files.
+- Let display messages wait until the soundbar is on, with their duration starting when the bar wakes.
+- Add controls to forget individual recent timers and messages, and correct the Front EQ status text.
+
 ## 0.3.0-dev.11
 
 - Add experimental front-display messages with repeat, duration and until-cleared options; multiple messages take turns and can be cleared with the JBL remote.
