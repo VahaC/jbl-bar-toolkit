@@ -1,5 +1,8 @@
 # Development
 
+Follow the [experience principle](docs/EXPERIENCE.md): infer early, recommend
+defaults, reveal progressively and keep choices editable.
+
 The [root README](README.md) is the setup guide. Repository setup builds current
 source; downloaded platform executables use published packages without Go or
 installation. Bar 9.1 is the supported implementation; other models remain research.
@@ -71,6 +74,18 @@ GitHub images. Never capture private device data. The compact [UI feature map](d
 and frozen `tests/fixtures/remote-ui-baseline.json` preserve semantic coverage.
 
 ## Ownership and qualification
+
+Credit adopted suggestions in the commit body, PR description and release notes
+with the original author's GitHub handle and a link to their issue/comment.
+Distinguish diagnosis or suggested approaches from implementation authorship.
+For the Windows formatting and Ethernet fixes, credit **@VahaC**:
+[#58](https://github.com/kisinga/jbl-bar-toolkit/issues/58) and
+[#59](https://github.com/kisinga/jbl-bar-toolkit/issues/59).
+
+Formatting tests execute the production PowerShell script with mocked storage
+cmdlets when `pwsh` or `powershell.exe` is available (including Windows CI).
+They never format a drive. Physical formatting/UAC and soundbar Ethernet/Wi-Fi
+restart results must be recorded separately from host test results.
 
 The root Go module owns setup/build tooling; `apps/remote` is a separate Go
 module for the device application. `models/bar91` owns installation, recovery,

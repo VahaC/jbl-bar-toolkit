@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"log"
 	"net"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -82,7 +85,7 @@ func discoveryRecordPayload(ip net.IP, interfaceIndex uint32) ([]byte, error) {
 	// while Linux keeps the same wlan0 index. A record bound to that specific
 	// native interface stops answering after such a refresh. DNS-SD Any follows
 	// the daemon's current interfaces; the monitor still selects and withdraws
-	// this address using the allowed wlan0 interface and configured LAN.
+	// this address using the selected LAN interface and configured subnet.
 	binary.BigEndian.PutUint32(b[5:9], 0) // kDNSServiceInterfaceIndexAny.
 	b = append(b, discoveryName...)
 	b = append(b, 0)
@@ -250,9 +253,13 @@ func setDiscoveryHostname(hostname string) {
 	discoveryStatus.Unlock()
 }
 func discoveryInterfaceAddress(iface net.Interface, addresses []net.Addr, network *net.IPNet) (net.IP, uint32, error) {
-	if network == nil || iface.Index <= 0 || iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 {
-		return nil, 0, errors.New("Wi-Fi multicast is not ready")
+	// An unplugged Ethernet interface can remain administratively up with its
+	// previous address. Require an operational link before preferring it to Wi-Fi.
+	ready := net.FlagUp | net.FlagRunning
+	if network == nil || iface.Index <= 0 || iface.Flags&ready != ready || iface.Flags&net.FlagLoopback != 0 || iface.Name == "lo" || iface.Name == "ap0" || strings.HasPrefix(iface.Name, "p2p") {
+		return nil, 0, errors.New("Home-network interface is not ready")
 	}
+	var selected net.IP
 	for _, address := range addresses {
 		var ip net.IP
 		switch address := address.(type) {
@@ -261,25 +268,44 @@ func discoveryInterfaceAddress(iface net.Interface, addresses []net.Addr, networ
 		case *net.IPAddr:
 			ip = address.IP.To4()
 		}
-		if ip != nil && ip.IsGlobalUnicast() && network.Contains(ip) {
-			return append(net.IP(nil), ip...), uint32(iface.Index), nil
+		if ip != nil && ip.IsPrivate() && network.Contains(ip) && (selected == nil || bytes.Compare(ip, selected) < 0) {
+			selected = append(net.IP(nil), ip...)
 		}
 	}
-	return nil, 0, errors.New("Wi-Fi has no address in the configured LAN")
+	if selected != nil {
+		return selected, uint32(iface.Index), nil
+	}
+	return nil, 0, errors.New("No address in the configured home network")
 }
-func discoveryWiFiAddress(network *net.IPNet) (net.IP, uint32, error) {
-	iface, e := net.InterfaceByName("wlan0")
+func discoveryLANAddress(network *net.IPNet) (net.IP, uint32, error) {
+	interfaces, e := net.Interfaces()
 	if e != nil {
-		return nil, 0, errors.New("Wi-Fi interface is not available")
+		return nil, 0, errors.New("Home-network interfaces are not available")
 	}
-	addresses, e := iface.Addrs()
-	if e != nil {
-		return nil, 0, errors.New("Wi-Fi addresses are not available")
-	}
-	return discoveryInterfaceAddress(*iface, addresses, network)
+	return selectDiscoveryLAN(interfaces, func(iface net.Interface) ([]net.Addr, error) { return iface.Addrs() }, network)
 }
 
-// monitorDiscovery follows the existing Wi-Fi address without changing it.
+// Match the managed SSH selector: interface name, then numeric private IPv4.
+// Selecting an address does not establish that Bonjour can advertise it.
+func selectDiscoveryLAN(interfaces []net.Interface, addrs func(net.Interface) ([]net.Addr, error), network *net.IPNet) (net.IP, uint32, error) {
+	interfaces = append([]net.Interface(nil), interfaces...)
+	sort.Slice(interfaces, func(i, j int) bool { return interfaces[i].Name < interfaces[j].Name })
+	for _, iface := range interfaces {
+		addresses, err := addrs(iface)
+		if err != nil {
+			continue
+		}
+		if ip, index, err := discoveryInterfaceAddress(iface, addresses, network); err == nil {
+			if iface.Flags&net.FlagMulticast == 0 {
+				return nil, 0, errors.New("Selected home-network interface does not support multicast")
+			}
+			return ip, index, nil
+		}
+	}
+	return nil, 0, errors.New("No active wired or Wi-Fi address in the configured home network")
+}
+
+// monitorDiscovery follows the selected LAN address without changing networking.
 // It owns only this process's alias registration; the system Bonjour daemon
 // remains responsible for all existing AirPlay/Cast advertisements.
 func monitorDiscovery(ctx context.Context, network *net.IPNet) {
@@ -314,7 +340,7 @@ func monitorDiscovery(ctx context.Context, network *net.IPNet) {
 		if ctx.Err() != nil {
 			return
 		}
-		ip, index, addressErr := discoveryWiFiAddress(network)
+		ip, index, addressErr := discoveryLANAddress(network)
 		currentDesired := ""
 		if addressErr == nil {
 			currentDesired = fmt.Sprintf("%d/%s", index, ip)

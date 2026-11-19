@@ -14,7 +14,7 @@ private. SETUP.html points to this tool; offline bundles include all files.
 Set action=check in JBLToolkit/config.txt. Insert with the bar fully on and wait
 FIVE MINUTES. Read CHECKS.txt, PREFLIGHT.txt, DIAGNOSTICS.txt, native-check.json and STATUS.txt on the computer.
 Require CHECK_PASSED_READY_FOR_INSTALL_OR_CONFIGURE. Recognized installations
-are checked for update or migration; do not delete them to bypass ownership checks.
+are checked for managed update or explicit clean replacement; do not delete them to bypass ownership checks.
 The check does not install services, change networking or press controls.
 
 INSTALL / UPDATE
@@ -49,14 +49,14 @@ Configuration actions restart managed services. Existing SSH sessions may remain
 Do not combine standalone Smart Mode, SSH or web installers with this package.
 
 LEGACY MIGRATION (ADVANCED)
-Normal install preserves existing standalone stores and refuses adoption.
-Install / update automatically migrates the exact reviewed rev6 + SSH + remote
-chain. The explicit action=migrate remains available for advanced use.
-Read MIGRATION_CHECK.txt and the repository guide first. It verifies owner
-markers, exact scripts and hook snapshots, stops recognized services, retains
-original files inactive in /var/JBLToolkitLegacy and installs the toolkit.
-It preserves the SSH host key. Unknown scripts/hooks/processes are not adopted.
-Recovery deactivates the toolkit; it does not reactivate the old chain.
+Older standalone setups are retired. Run action=check first, then choose
+Replace older installation (fresh setup), action=reinstall. REINSTALL_CHECK.txt
+reports eligibility. The helper stops recognized services, archives their files
+privately and runs the ordinary installer with your new configuration/password.
+Old settings, sound preferences and admin host keys are not imported.
+Unknown or modified setups are preserved and need their original removal route.
+The old action=migrate is deprecated and makes no changes.
+Help: https://github.com/kisinga/jbl-bar-toolkit/blob/main/docs/models/bar91/OLDER-INSTALLATIONS.md
 
 RECOVERY
 Set action=uninstall, or create an empty JBLToolkit/RECOVER file (no extension).

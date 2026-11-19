@@ -22,8 +22,9 @@ against the [frozen baseline](../tests/fixtures/remote-ui-baseline.json) by
 **Packaging:** default Go setup/CI builds include the verified project-owned EQ
 and Bluetooth helpers. EQ still requires a supported active Standard playback
 route; source-specific playback and native dependency guards remain intact.
-Front-display feedback is an unavailable experimental capability until a native
-entry mechanism is qualified; contract fixtures do not enable screen writes.
+Experimental front-display [messages and clock](DISPLAY_MESSAGES.md) and
+[timers](TIMERS.md) are implemented for the qualified Bar 9.1 native route.
+Their device/firmware guards still apply; this does not qualify combined installation.
 
 **Layout:** equal sound columns at ≥900px; stacked below. Audio sync, Bass offset
 and System monitor start open. Other disclosures start closed. Updates preserve

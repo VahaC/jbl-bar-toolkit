@@ -21,8 +21,17 @@ routes still need research. Model-specific ZIPs are also provided by CI.
 Full combined installation, USB-free restart and recovery qualification remains
 pending. Recovery is independent of the remote and config. Keep an existing
 installation's original USB/recovery. Choose **Install / update everything**
-to install, migrate a recognized standalone setup, or update a toolkit. Toolkit
+to install or update a managed toolkit. Older standalone setups use an explicit
+clean replacement with new settings, not an in-place upgrade. Toolkit
 updates retain installed settings, SSH credentials/host keys and sound settings.
 Unknown or modified installations stop before replacement. This updates toolkit
 software, not JBL firmware.
+Setup recommends Remote admin access with a chosen password for future network
+updates without USB.
+
+Windows USB formatting and wired/Wi-Fi LAN selection fixes follow @VahaC's
+diagnoses and suggested approaches in [#58](https://github.com/kisinga/jbl-bar-toolkit/issues/58)
+and [#59](https://github.com/kisinga/jbl-bar-toolkit/issues/59). LAN selection also
+skips disconnected interfaces that retain an address.
+
 Public ZIPs contain no owner credentials. Configured USBs must stay private.

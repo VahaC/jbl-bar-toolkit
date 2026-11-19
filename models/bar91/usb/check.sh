@@ -33,12 +33,14 @@ result=0
     done
 } > "$USB/DIAGNOSTICS.txt" 2>&1
 preflight_all || result=1
-migration_eligible=false
-if legacy_check; then
-    migration_eligible=true
-    printf 'MIGRATION_ELIGIBLE=true\nPROFILE=reviewed-%s-prototype-ssh-remote-chain\n' "$LEGACY_STANDARD_REVISION" > "$USB/MIGRATION_CHECK.txt"
+# Preserve the report filename for existing readers, but no legacy installation
+# is an upgrade source now. Original removers, restart, then fresh installation.
+printf 'MIGRATION_ELIGIBLE=false\nREASON=LEGACY_UPGRADE_DEPRECATED\n' > "$USB/MIGRATION_CHECK.txt"
+if legacy_check && [ "$result" = 0 ]; then
+    printf 'REINSTALL_AVAILABLE=true\nSETTINGS=FRESH_SETUP\n' > "$USB/REINSTALL_CHECK.txt"
 else
-    printf 'MIGRATION_ELIGIBLE=false\nREASON=%s\n' "$LEGACY_REASON" > "$USB/MIGRATION_CHECK.txt"
+    [ "$result" = 0 ] || LEGACY_REASON=REINSTALL_PREFLIGHT_NOT_PASSED
+    printf 'REINSTALL_AVAILABLE=false\nREASON=%s\n' "$LEGACY_REASON" > "$USB/REINSTALL_CHECK.txt"
 fi
 native_result=${PREFLIGHT_NATIVE_RESULT:-skipped}
 if [ "$native_result" = passed ] && [ "${PREFLIGHT_REASON-}" != PASSED ]; then
@@ -55,18 +57,15 @@ fi
         runtime_integrity >/dev/null 2>&1 || { printf 'BLOCKER=INSTALLED_RUNTIME_INTEGRITY\n'; result=1; }
     else
         printf 'TOOLKIT=absent_or_unrecognized\n'
-        for path in "$STORE" "$SSH_STORE" "$REMOTE_STORE" /var/JBLStandard; do
+        for path in "$STORE" "$SSH_STORE" "$REMOTE_STORE" "$STANDARD_STORE" "$LEGACY_STORE"; do
             if [ -e "$path" ] || [ -L "$path" ]; then
-                if [ "$migration_eligible" = true ] && [ "$path" != "$STORE" ]; then
-                    printf 'MIGRATION_SOURCE=%s\n' "$path"
-                else
-                    printf 'BLOCKER=EXISTING_STORE:%s\n' "$path"
-                    result=1
-                fi
+                printf 'BLOCKER=EXISTING_STORE:%s\n' "$path"
+                [ "$path" = "$STORE" ] || printf 'BLOCKER=LEGACY_INSTALLATION_REQUIRES_FRESH_SETUP\n'
+                result=1
             fi
         done
         if [ -e "$HOOK" ] || [ -L "$HOOK" ]; then
-            if [ "$migration_eligible" != true ] && { ! regular "$HOOK" || "$BB" grep -Eq 'JBL(Standard|LocalSSH|Remote|Toolkit)' "$HOOK"; }; then
+            if ! regular "$HOOK" || "$BB" grep -Eq 'JBL(Standard|LocalSSH|Remote|Toolkit)' "$HOOK"; then
                 printf 'BLOCKER=EXISTING_OR_UNSAFE_COMPONENT_HOOK\n'
                 result=1
             fi

@@ -106,7 +106,7 @@ The combined 9.1 USB coordinator is canonical for new installations and owns the
 browser controls and automatic Standard Mode, preserves the original hook and
 provides independent recovery. Its implementation is under `models/bar91/usb/`;
 the [USB guide](models/bar91/USB-TOOLKIT.md) defines status, configuration,
-migration and recovery behavior.
+clean replacement and recovery behavior.
 
 `tools/prepare_usb.py` validates a private package and a mounted removable USB's
 DOS/MBR, first partition and FAT32 identity. It flushes and reads back the payload
@@ -118,12 +118,14 @@ readiness; `verify` requires a subsequent kernel boot and current service/native
 checks. Audio, authentication, physical USB removal, standby and recovery remain
 hardware qualification obligations, recorded separately from machine receipts.
 
-Standalone installers refuse toolkit-owned stores. Normal installation preserves
-and refuses existing standalone paths. Explicit `action=migrate` accepts only
-the exact reviewed rev5 (public v0.1.0) or rev6/SSH/remote scripts, owners and hook snapshots. It retires
-their live paths into a private archive on the same filesystem, retaining the
-SSH host key, before normal installation. Unknown chains remain blocked.
-Recovery disables the toolkit; it does not silently reactivate archived services.
+Standalone installers refuse toolkit-owned stores. Normal toolkit updates retain
+managed settings; standalone state is never upgraded in place. Explicit
+`action=reinstall` runs a narrow removal helper for pinned known Smart Mode
+setups with optional known SSH/remote additions, archives their inactive files,
+and runs the ordinary installer with newly chosen configuration and credentials.
+It does not import old sound settings, passwords or host keys. Unknown chains
+remain blocked. Deprecated `action=migrate` returns a fresh-setup explanation.
+Recovery disables the new toolkit and retains the inactive archive.
 
 Repository locations and artifact/device paths are separate contracts. Builders
 still emit `AutoScript/AutoScript`, `JBLToolkit/`, `JBLLocalSSH/`, and the existing
@@ -222,7 +224,7 @@ Bootstrap, release application and owner configuration are distinct responsibili
 USB and SSH use the same guarded Bar 9.1 manager. SSH authenticates against a
 confirmed public host key, checks the installed runtime, and transfers verified
 files to a private RAM directory. Only managed-installation updates can use this
-entry; installation, migration and recovery use USB. Network updates retain the verified SSH listener while updating its support files.
+entry; installation, clean replacement and recovery use USB. Network updates retain the verified SSH listener while updating its support files.
 The detached worker survives connection loss and reports its result for host readback. Timeouts preserve evidence
 and report an uncertain outcome, never success. Neither route qualifies hardware boot
 and recovery. New model work can progress through normalized replay and verified

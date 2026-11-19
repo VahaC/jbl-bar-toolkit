@@ -2,6 +2,9 @@
 
 Describe the concrete problem and resulting owner/contributor behavior.
 
+Credit any adopted diagnosis or suggestion with its author's handle and issue/comment
+link; include the same credit in the commit body and release notes.
+
 ## Breaking changes
 
 Link the relevant short migration notes. State any source, API, USB layout or

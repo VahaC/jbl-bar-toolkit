@@ -149,7 +149,7 @@ bye
 ssh -p 2222 root@<bar-ip-address> '/bin/sh /var/JBLRemote/install.sh'
 ```
 
-Open `http://jbl.local`, or the bar’s local IP if mDNS is blocked/conflicting. Port `8080` remains available. Existing Bonjour handles probing/conflicts; registration follows Wi-Fi address changes and withdraws on exit. No silent alias renaming occurs.
+Open `http://jbl.local`, or the bar’s local IP if mDNS is blocked/conflicting. Port `8080` remains available. Existing Bonjour handles probing/conflicts; registration follows the selected wired/Wi-Fi LAN address and withdraws on exit. No silent alias renaming occurs.
 
 Anyone on the configured trusted subnet can use the remote without a web login. Requests must match accepted Host/local interface addresses. Active native `ap0` hotspot clients are also allowed only for that interface’s HTTP destination. Fixed commands, JSON-only POSTs, same-origin checks and CSRF tokens guard mutations; no arbitrary command/filesystem endpoint is exposed.
 

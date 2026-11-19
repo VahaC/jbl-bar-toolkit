@@ -25,6 +25,15 @@ cases = []
 result = subprocess.run([str(ROOT / 'jbl'), 'models', '--json'], capture_output=True, text=True, check=True)
 assert {m['id'] for m in json.loads(result.stdout)} == {'bar91','bar800','bar1000','bar1300'}
 cases.append('unified_model_catalog')
+fresh = project.configuration('bar91', '192.168.1.0/24', 'web,ssh,auto-standard', 'reinstall')
+assert build_usb.parse_config(fresh)['ACTION'] == 'reinstall'
+try:
+    project.configuration('bar91', '192.168.1.0/24', 'web', 'migrate')
+except ValueError:
+    pass
+else:
+    raise AssertionError('deprecated legacy migration was offered by the CLI')
+cases.append('explicit_fresh_reinstall_cli_without_legacy_upgrade')
 with patch.object(project, 'catalog', return_value={'bar1300': {'name':'Bar 1300', 'guide':'research/', 'status':'qualified'}}):
     try:
         project.require_installer('bar1300')

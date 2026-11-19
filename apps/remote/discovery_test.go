@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -170,23 +171,23 @@ func TestDiscoveryNativeIPCAndWithdrawal(t *testing.T) {
 	}
 }
 
-func TestDiscoveryOnlyUsesReadyWiFiInAllowedLAN(t *testing.T) {
-	_, network, _ := net.ParseCIDR("192.0.2.0/24")
-	iface := net.Interface{Name: "wlan0", Index: 7, Flags: net.FlagUp | net.FlagMulticast}
+func TestDiscoveryOnlyUsesActivePrivateLAN(t *testing.T) {
+	_, network, _ := net.ParseCIDR("192.168.2.0/24")
+	iface := net.Interface{Name: "wlan0", Index: 7, Flags: net.FlagUp | net.FlagRunning | net.FlagMulticast}
 	addresses := []net.Addr{
 		&net.IPNet{IP: net.ParseIP("fe80::42"), Mask: net.CIDRMask(64, 128)},
 		&net.IPNet{IP: net.ParseIP("198.51.100.9"), Mask: net.CIDRMask(24, 32)},
-		&net.IPNet{IP: net.ParseIP("192.0.2.42"), Mask: net.CIDRMask(24, 32)},
+		&net.IPNet{IP: net.ParseIP("192.168.2.42"), Mask: net.CIDRMask(24, 32)},
 	}
 	ip, index, e := discoveryInterfaceAddress(iface, addresses, network)
-	if e != nil || !ip.Equal(net.ParseIP("192.0.2.42")) || index != 7 {
+	if e != nil || !ip.Equal(net.ParseIP("192.168.2.42")) || index != 7 {
 		t.Fatal(ip, index, e)
 	}
-	for _, flags := range []net.Flags{0, net.FlagUp, net.FlagMulticast} {
+	for _, flags := range []net.Flags{0, net.FlagMulticast, net.FlagUp | net.FlagMulticast, net.FlagRunning | net.FlagMulticast, net.FlagUp | net.FlagRunning | net.FlagLoopback} {
 		bad := iface
 		bad.Flags = flags
 		if _, _, e := discoveryInterfaceAddress(bad, addresses, network); e == nil {
-			t.Fatal("inactive/nonmulticast interface accepted", flags)
+			t.Fatal("inactive/loopback interface accepted", flags)
 		}
 	}
 	if _, _, e := discoveryInterfaceAddress(iface, addresses[:2], network); e == nil {
@@ -209,5 +210,61 @@ func TestDiscoveryHostnameOnlyPublishesConfirmedValue(t *testing.T) {
 	setDiscoveryHostname("")
 	if discoveryHostname() != "" {
 		t.Fatal("withdrawn hostname remained visible")
+	}
+}
+
+func TestDiscoveryLANSelection(t *testing.T) {
+	_, network, _ := net.ParseCIDR("192.168.1.0/24")
+	up := net.FlagUp | net.FlagRunning | net.FlagMulticast
+	ethernet := net.Interface{Name: "eth0", Index: 2, Flags: up}
+	wifi := net.Interface{Name: "wlan0", Index: 7, Flags: up}
+	addresses := func(iface net.Interface) ([]net.Addr, error) {
+		ips := []string{"192.168.1.20", "192.168.1.9"}
+		if iface.Name == "wlan0" {
+			ips = []string{"192.168.1.40"}
+		}
+		var out []net.Addr
+		for _, ip := range ips {
+			out = append(out, &net.IPAddr{IP: net.ParseIP(ip)})
+		}
+		return out, nil
+	}
+	for _, tc := range []struct {
+		name string
+		ifs  []net.Interface
+		want string
+	}{
+		{"wired", []net.Interface{ethernet}, "192.168.1.9"},
+		{"wifi", []net.Interface{wifi}, "192.168.1.40"},
+		{"both", []net.Interface{wifi, ethernet}, "192.168.1.9"},
+		{"exclusions", []net.Interface{{Name: "ap0", Index: 1, Flags: up}, {Name: "lo", Index: 3, Flags: up | net.FlagLoopback}, {Name: "p2p0", Index: 4, Flags: up}, wifi}, "192.168.1.40"},
+		{"wired-down", []net.Interface{{Name: "eth0", Index: 2}, wifi}, "192.168.1.40"},
+		{"wired-no-carrier-retained-address", []net.Interface{{Name: "eth0", Index: 2, Flags: net.FlagUp | net.FlagMulticast}, wifi}, "192.168.1.40"},
+		{"wired-no-carrier-only", []net.Interface{{Name: "eth0", Index: 2, Flags: net.FlagUp | net.FlagMulticast}}, ""},
+		{"wifi-no-carrier-only", []net.Interface{{Name: "wlan0", Index: 7, Flags: net.FlagUp | net.FlagMulticast}}, ""},
+		{"none", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ip, _, err := selectDiscoveryLAN(tc.ifs, addresses, network)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatal("accepted absent network")
+				}
+				return
+			}
+			if err != nil || ip.String() != tc.want {
+				t.Fatal(ip, err)
+			}
+		})
+	}
+	for _, ip := range []string{"8.8.8.8", "192.168.2.9", "192.168.1.80", "192.168.1.81"} {
+		selected, _, err := selectDiscoveryLAN([]net.Interface{ethernet}, func(net.Interface) ([]net.Addr, error) { return []net.Addr{&net.IPAddr{IP: net.ParseIP(ip)}}, nil }, network)
+		if strings.HasPrefix(ip, "192.168.1.") {
+			if err != nil || selected.String() != ip {
+				t.Fatal(selected, err)
+			}
+		} else if err == nil {
+			t.Fatal("accepted wrong LAN", ip)
+		}
 	}
 }

@@ -193,7 +193,7 @@ func ParseConfig(text string) (map[string]string, error) {
 			return fail()
 		}
 	}
-	actions := map[string]bool{"check": true, "install": true, "update": true, "configure": true, "verify": true, "uninstall": true, "migrate": true}
+	actions := map[string]bool{"check": true, "install": true, "update": true, "configure": true, "verify": true, "uninstall": true, "reinstall": true, "migrate": true}
 	if m["format"] != "1" || !actions[m["action"]] {
 		return fail()
 	}

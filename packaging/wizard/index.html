@@ -20,14 +20,18 @@
         </div>
         <span id="version"></span>
       </header>
+      <div class="view-choice">
+        <span>Recommended settings, one step at a time.</span>
+        <button id="all-controls" type="button" aria-pressed="false">Show all controls</button>
+      </div>
       <nav class="setup-methods" aria-label="Setup method">
         <button id="usb-method" type="button" aria-pressed="true">
           <strong>USB setup</strong>
           <span>Install, change settings or recover your bar.</span>
         </button>
         <button id="network-method" type="button" aria-pressed="false">
-          <strong>Network update <small>SSH</small></strong>
-          <span>Already enabled SSH? Update without a USB.</span>
+          <strong>Network update</strong>
+          <span>Admin access enabled? Update without a USB.</span>
         </button>
       </nav>
       <section>
@@ -59,10 +63,19 @@
             <option value="">Select a USB drive…</option>
           </select>
           <p id="drive-status">Insert your USB, then refresh.</p>
+          <div id="guidance" role="status" aria-live="polite" hidden>
+            <p id="guidance-text"></p>
+            <button id="use-recommendation" type="button" hidden></button>
+            <button id="recover-recommendation" type="button" hidden>Choose recovery instead</button>
+            <a id="legacy-help" href="https://github.com/kisinga/jbl-bar-toolkit/blob/main/docs/models/bar91/OLDER-INSTALLATIONS.md" target="_blank" rel="noopener" hidden>Older-installation guide</a>
+          </div>
           <details id="reports" hidden>
-            <summary>Soundbar check results</summary>
+            <summary>Technical details</summary>
             <pre id="reports-text"></pre>
           </details>
+          <details id="format-options" data-controls>
+            <summary>USB format</summary>
+          <p id="format-advice">This USB does not need formatting if it is already eligible.</p>
           <label class="check"
             ><input id="format" type="checkbox" /> Format this USB as FAT32 /
             MBR first</label
@@ -78,9 +91,16 @@
             ><strong id="erase-device"></strong
             ><input id="confirm" autocomplete="off" spellcheck="false" />
           </div>
+          </details>
         </section>
         <section>
           <h2>Your settings</h2>
+          <p id="settings-summary">Browser remote and automatic Standard Mode after wake.</p>
+          <details id="custom-settings" data-controls>
+            <summary>Customize settings</summary>
+          <p id="network-summary">Choose your home network.</p>
+          <details id="network-settings" data-controls>
+            <summary>Edit home network</summary>
           <label for="network-select">Home network</label
           ><select id="network-select">
             <option value="">Enter manually</option>
@@ -117,21 +137,33 @@
             </div>
           </div>
           <small id="network">Use the same network as the soundbar.</small>
+          <label for="web-port">Browser remote port</label>
+          <input id="web-port" type="number" min="1" max="65535" value="80" required />
+          </details>
           <label class="check"
             ><input id="web" type="checkbox" checked /> Browser remote</label
           ><label class="check"
-            ><input id="standard" type="checkbox" /> Automatically select
+            ><input id="standard" type="checkbox" checked /> Automatically select
             Standard Mode after wake</label
           ><label class="check"
             ><input id="memory" type="checkbox" disabled /> Remember the mode
             chosen before standby</label
           >
-          <details id="usb-access">
-            <summary>SSH and optional Wi-Fi</summary>
+          <details id="wifi-settings" data-controls>
+            <summary>Set up Wi-Fi (optional)</summary>
+            <p>Leave Wi-Fi blank if the bar is already connected.</p>
+            <label for="ssid">Wi-Fi name</label>
+            <input id="ssid" autocomplete="off" />
+            <label for="wifiPassword">WPA2 Wi-Fi password</label>
+            <input id="wifiPassword" type="password" autocomplete="new-password" />
+          </details>
+          </details>
+          <details id="usb-access" data-controls open>
+            <summary>Remote admin access</summary>
+            <p>Choose a password to update the bar over your home network later, without a USB.</p>
             <label class="check"
-              ><input id="ssh" type="checkbox" /> Enable SSH access (port
-              2222)</label
-            ><label for="password">SSH password</label
+              ><input id="ssh" type="checkbox" checked /> Enable remote admin access</label
+            ><label for="password">Admin password</label
             ><input
               id="password"
               type="password"
@@ -143,16 +175,11 @@
               >Leave blank to keep the password already saved on this
               USB.</small
             >
-            <p>Leave Wi-Fi blank if the bar is already connected.</p>
-            <label for="ssid">Wi-Fi name</label
-            ><input id="ssid" autocomplete="off" /><label for="wifiPassword"
-              >WPA2 Wi-Fi password</label
-            ><input
-              id="wifiPassword"
-              type="password"
-              autocomplete="new-password"
-            />
+            <small>Use a separate password, at least 8 characters. Keep it for future updates.</small>
+            <details><summary>Connection details</summary><p>Remote admin access uses SSH as root on port 2222, restricted to your configured home network.</p></details>
           </details>
+          <details id="action-controls" data-controls>
+            <summary>Choose another action</summary>
           <label for="action">Soundbar action</label
           ><select id="action">
             <option value="check">Check compatibility first</option>
@@ -161,34 +188,40 @@
             <option value="verify">Verify after a restart without USB</option>
             <option value="uninstall">Uninstall</option>
             <option value="install">First installation only (advanced)</option>
-            <option value="migrate">
-              Migrate reviewed legacy installation (advanced)
-            </option></select
+            <option value="reinstall">Replace older installation (fresh setup)</option>
+            </select
           ><small
             >Start with Check. Reconnect the USB after the bar finishes to read
             its results, then choose Install / update. Hardware compatibility is
             checked on the bar.</small
           >
+          </details>
         </section>
         <section class="finish">
+          <p id="selected-action">Next: Check compatibility first</p>
           <p id="review">
             Select a drive to review where files will be written.
           </p>
           <button id="prepare" type="submit" disabled>
             Prepare selected USB</button
           ><output id="result" role="status" aria-live="polite"></output>
+          <details id="prepare-details" hidden>
+            <summary>Technical details</summary>
+            <pre id="prepare-error"></pre>
+          </details>
         </section>
       </form>
       <form id="network-form" hidden>
         <section>
           <h2>Update over your home network</h2>
-          <p>For a bar with toolkit-managed SSH already enabled. Keep the bar fully on. Your installed features, network settings, SSH keys and sound settings are kept.</p>
+          <p>For a bar with remote admin access already enabled. Keep the bar fully on. Your settings and saved sound preferences are kept.</p>
           <label for="ssh-host">Soundbar address</label>
           <input id="ssh-host" value="jbl.local" placeholder="jbl.local or 192.168.1.50" autocomplete="off" spellcheck="false" required />
           <small>We’ll look for jbl.local automatically. Enter the bar’s IP if it can’t be found.</small>
-          <label for="ssh-login-password">SSH password</label>
+          <label for="ssh-login-password">Admin password</label>
           <input id="ssh-login-password" type="password" autocomplete="current-password" maxlength="256" required />
-          <small>The password you chose when enabling SSH, not your Wi-Fi password. It isn’t saved. Connects as root on port 2222.</small>
+          <small>The separate password you chose in setup, not your Wi-Fi password. It isn’t saved.</small>
+          <details><summary>Connection details</summary><p>Connects with SSH as root on port 2222. Older toolkit versions call this the SSH password.</p></details>
           <div id="ssh-trust" hidden>
             <p>First connection to this speaker. Confirm its identity once; this computer will remember its public host key.</p>
             <code id="ssh-fingerprint"></code>
@@ -199,12 +232,12 @@
             <button id="ssh-check" type="submit">Check connection</button>
             <button id="ssh-update" type="button" disabled>Update bar</button>
           </div>
-          <output id="ssh-result" role="status" aria-live="polite">Enter your SSH password to check the connection.</output>
+          <output id="ssh-result" role="status" aria-live="polite">Enter your admin password to check the connection.</output>
           <details id="ssh-reports" hidden>
             <summary>Update results</summary>
             <pre id="ssh-reports-text"></pre>
           </details>
-          <small>Initial installation, SSH enablement, settings changes and recovery use USB setup. Keep your original recovery ZIP.</small>
+          <small>Initial installation, enabling admin access, settings changes and recovery use USB setup. Keep your original recovery ZIP.</small>
         </section>
       </form>
       <footer>

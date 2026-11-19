@@ -26,29 +26,55 @@ verify_tools() {
 find_address() {
     # Restrict SSH to a private IPv4 interface sharing the owner's PC subnet.
     # Honor the actual interface prefix rather than assuming a /24 or address.
-    # If ALLOWED_PC is a net/prefix, use the first private interface address inside it.
-    "$BB" ip -4 -o addr show dev "$INTERFACE" 2>/dev/null |
-    "$BB" awk -v pc="$ALLOWED_PC" '
+    # @VahaC identified the wlan0-only failure and proposed LAN selection (#59).
+    # Auto and discovery use interface-name then numeric-address order.
+    {
+        # Address filtering by "up" checks only administrative state. Inspect
+        # carrier too, since unplugged Ethernet can retain its old LAN address.
+        "$BB" ip -o link show up 2>/dev/null || return 1
+        if [ "${INTERFACE:-auto}" = auto ]; then
+            "$BB" ip -4 -o addr show up 2>/dev/null
+        else
+            "$BB" ip -4 -o addr show dev "$INTERFACE" up 2>/dev/null
+        fi
+    } |
+    "$BB" awk -v pc="$ALLOWED_PC" -v selected="${INTERFACE:-auto}" '
     function number(s, a,n,i,v) {
         n=split(s,a,"."); if(n!=4) return -1; v=0;
         for(i=1;i<=4;i++) {if(a[i]!~/^[0-9]+$/ || a[i]>255) return -1; v=v*256+a[i]}
         return v
     }
+    $3 ~ /^</ {
+        name=$2; sub(/:$/, "", name); split(name,iface,"@");
+        flags="," substr($3,2,length($3)-2) ",";
+        active[iface[1]]=(index(flags,",UP,") && index(flags,",LOWER_UP,") && !index(flags,",DORMANT,"));
+        next
+    }
     $3=="inet" {
+        split($2,iface,"@"); name=iface[1];
+        if(!active[name]) next;
+        if(selected!="auto" && name!=selected) next;
+        if(name=="lo" || name=="ap0" || name~/^p2p/) next;
         split($4,c,"/"); split(c[1],b,"."); ip=number(c[1]);
         private=(b[1]==10 || (b[1]==172 && b[2]>=16 && b[2]<=31) || (b[1]==192 && b[2]==168));
         if(index(pc,"/")) {
             split(pc,p,"/"); net=number(p[1]);
             if(ip<0 || net<0 || p[2]!~/^[0-9]+$/ || p[2]<1 || p[2]>32 || !private) next;
             unit=1; for(i=0;i<32-p[2];i++) unit*=2;
-            if(int(ip/unit)==int(net/unit)) {print c[1]; exit}
+            if(int(ip/unit)==int(net/unit)) choose(name,ip,c[1]);
             next
         }
         owner=number(pc);
         if(ip<0 || owner<0 || c[2]<1 || c[2]>32 || !private || ip==owner) next;
         unit=1; for(i=0;i<32-c[2];i++) unit*=2;
-        if(int(ip/unit)==int(owner/unit)) {print c[1]; exit}
-    }'
+        if(int(ip/unit)==int(owner/unit)) choose(name,ip,c[1]);
+    }
+    function choose(name,ip,text) {
+        if(!found || "x" name < "x" bestname || (name==bestname && ip<bestip)) {
+            found=1; bestname=name; bestip=ip; besttext=text
+        }
+    }
+    END {if(found) print besttext}'
 }
 daemon_running() {
     [ -f "$STORE/sshd.pid" ] || return 1

@@ -1,26 +1,104 @@
-# Bar 9.1 installation reference
+# Bar 9.1 installation and recovery
 
-Use the [root README](../../../README.md) for the setup workflow. Install root SSH, the browser remote and automatic Standard Mode together, or select only the features you need. One manager owns the startup hook and recovery path.
+**Experimental prereleases are available.** Individual features have device
+records; complete installation, restart and recovery qualification is pending.
+Only the exact supported Bar 9.1 firmware identities pass compatibility checks.
 
-**Development build: host-tested; complete hardware installation and recovery are not yet qualified.** Existing per-feature device records do not validate this combined installer. No combined public release has been published.
+## Get started
 
-## Prepare a USB
+1. **Run setup on your computer.** Download `jbl-setup-OS-ARCH` from
+   [Releases](https://github.com/kisinga/jbl-bar-toolkit/releases), then choose
+   **USB setup**. Keep setup outside the USB you intend to format.
+2. **Review the recommendation.** New setups enable the browser remote and
+   automatic Standard Mode and **Remote admin access**. Choose an admin password
+   so future updates work without USB. Existing toolkit settings are retained. Use **Customize
+   settings** or **Show all controls** to edit them. If several home networks
+   are detected, choose the one shared with the bar. Leave Wi-Fi blank when
+   already connected; Ethernet works without Wi-Fi provisioning.
+3. **Prepare a compatibility check.** Select your USB and **Prepare selected
+   USB**. Format only when needed; it erases the entire drive and requires
+   confirmation. Save the matching recovery ZIP on your computer.
+4. **Return the USB and read the result.** For each USB pass: insert it into
+   the fully awake bar, leave its buttons alone and wait **five minutes**.
+   Return it to your computer and choose **Refresh drives**. Setup explains
+   the result; **Technical details** contains the original reports.
+5. **Install after the check passes.** Choose the recommended **Install / update
+   everything**, then **Prepare selected USB**, without formatting. Keep a
+   copy of the USB contents on your computer before inserting it into the bar.
+   Repeat step 4. If it fails, use [failure guidance](#if-an-installation-fails).
+6. **Restart and verify.** Remove the USB, unplug the bar for **60 seconds**,
+   reconnect and turn it on. Open [jbl.local](http://jbl.local), or the bar's IP
+   from your router. Then prepare the recommended restart verification and
+   repeat step 4. Check normal playback, volume and standby. Keep the USB and
+   recovery ZIP private.
 
-Use the [root setup guide](../../../README.md#get-started) for downloads and
-configuration. For local development, install Go 1.25.7+ and run from the root:
+A recommendation only selects the next action. Nothing is written until you
+choose **Prepare selected USB**. **Choose another action** exposes all actions.
 
-```sh
-go run ./apps/usbsetup --repo .
-```
+<details>
+<summary>Downloads, launching and offline use</summary>
 
-Setup uses current source in repository mode and verified public packages in a
-downloaded executable. It checks write/readback integrity and safely ejects the
-USB on success. Formatting requires explicit erase confirmation and an OS admin
-prompt. Never run setup from the USB you intend to format. Keep the matching
-recovery ZIP. Device-side firmware qualification still runs on the soundbar.
+| Computer | Executable |
+| --- | --- |
+| Windows, Intel/AMD | `jbl-setup-windows-amd64.exe` |
+| Windows, ARM | `jbl-setup-windows-arm64.exe` |
+| Mac, Apple Silicon | `jbl-setup-darwin-arm64` |
+| Mac, Intel | `jbl-setup-darwin-amd64` |
+| Linux, Intel/AMD | `jbl-setup-linux-amd64` |
+| Linux, ARM64 | `jbl-setup-linux-arm64` |
 
-This reference covers installation safeguards, reports, configuration and recovery.
-Optional helper development is documented in [development](DEVELOPMENT.md).
+The executable is unsigned; follow your OS's permission prompt. On Linux/macOS,
+use `chmod +x <downloaded-file>` if execution permission is missing. No Go,
+Python or installer is needed. Keep setup open while using its browser page.
+
+For offline setup, extract the matching `…-setup-OS-ARCH.zip` on your computer
+and run its executable beside the included toolkit/recovery ZIPs. Online setup
+downloads and checksum-verifies those files. **Check for updates** refreshes
+packages; **Update this setup app** replaces the executable and requires restart.
+
+For source development, use Go 1.25.7+ and run `go run ./apps/usbsetup --repo .`
+from the repository root. Restart setup after source edits. See
+[development](../../../CONTRIBUTING.md).
+
+CI artifacts are development downloads, require GitHub sign-in and expire after
+30 days. Extract GitHub's outer ZIP before the platform offline bundle.
+
+</details>
+
+## Update your toolkit
+
+With remote admin access already enabled, choose **Network update**, enter the
+admin password and **Check connection**. Confirm the host identity on first connection,
+then choose **Update bar**. Otherwise use **USB setup**, check compatibility and
+choose **Install / update everything**. Restart and verify afterward.
+
+Updates retain installed feature/network settings, SSH credentials/host keys and
+saved sound settings. Use **Apply configuration changes** separately to change
+features. Keep each installation's original USB and matching recovery ZIP.
+[Older standalone installations](OLDER-INSTALLATIONS.md) use an explicit
+automated clean replacement; old settings are not imported. Unknown or modified
+chains are preserved for their original removal route.
+
+Managed SSH and local discovery automatically select an active private address
+inside the configured LAN, on Ethernet or Wi-Fi. Both use interface-name then
+numeric-address order, excluding loopback and the setup hotspot. SSH selects at
+service startup; discovery follows address changes. A network update preserves
+its current SSH listener until restart. Standalone explicit interfaces still work.
+
+The formatting and LAN selection fixes follow **@VahaC**'s diagnoses and suggested
+approaches in [#58](https://github.com/kisinga/jbl-bar-toolkit/issues/58) and
+[#59](https://github.com/kisinga/jbl-bar-toolkit/issues/59). These changes are in
+**Unreleased**; older downloads retain their version's behavior. For #58 on an
+older download, use an already-FAT32/MBR USB with formatting off. For #59, the
+reported workaround is to disconnect Ethernet and restart on Wi-Fi.
+
+## Technical reference
+
+The sections below cover manual operation, qualification and recovery internals.
+The setup app uses the same guarded operations.
+
+<details>
+<summary>Manual installation and hardware qualification</summary>
 
 ## Check, install, and verify
 
@@ -29,7 +107,7 @@ Optional helper development is documented in [development](DEVELOPMENT.md).
    verifies the package, configuration and stored bytes before activating
    AutoScript last. After successful eject, unplug the drive from your computer.
 
-2. Set `JBLToolkit/config.txt` to `action=check`. Turn the bar fully on, let playback settle, insert USB and wait **five minutes**. Return USB to the computer. Read `CHECKS.txt`, `PREFLIGHT.txt`, `DIAGNOSTICS.txt`, `native-check.json`, `STATUS.txt` and `setup.log`. Require `CHECK_PASSED_READY_FOR_INSTALL_OR_CONFIGURE`. This operation reads native state and makes temporary write/copy/rename checks; it does not install, change networking, stop services or press controls. Existing standalone stores/hooks are reported as blockers and preserved.
+2. Set `JBLToolkit/config.txt` to `action=check`. Turn the bar fully on, let playback settle, insert USB and wait **five minutes**. Return USB to the computer. Read `CHECKS.txt`, `PREFLIGHT.txt`, `DIAGNOSTICS.txt`, `native-check.json`, `STATUS.txt` and `setup.log`. Require `CHECK_PASSED_READY_FOR_INSTALL_OR_CONFIGURE`. This operation reads native state and makes temporary write/copy/rename checks; it does not install, change networking, stop services or press controls. Standalone stores are blockers for normal installation. REINSTALL_CHECK.txt separately reports whether clean replacement is available; unknown stores/hooks are preserved.
 3. With a passing check and a clean installation target, set `action=install` on the same USB. Reinsert with the bar fully on and leave controls alone for **five minutes**. Automatic Standard selection may briefly mute audio. Return USB and require `INSTALLED_PENDING_REBOOT_TEST`. Read `RESULT.txt`, `setup.log` and exported logs. A partial failure is not installation success.
 4. With SSH selected, inspect `logs/connection.txt` and `host_ed25519.pub`. Compare the host-key fingerprint with the SSH client's prompt before accepting it. Test `ssh -p 2222 root@<bar-ip-address>`, an interactive shell and SFTP. With the web remote selected, open `http://jbl.local` or the bar's local IP and configured port. Use the IP if mDNS is unavailable.
 5. Remove USB, disconnect mains for **60 seconds**, reconnect, let LOAD finish, turn on, and wait for services/automation. Verify the chosen services return without USB and check normal audio, volume, mute, inputs and standby/CEC wake.
@@ -45,15 +123,25 @@ uses one new persistent payload copy plus 2 MiB reserve; probe executables run
 in RAM. A byte-identical managed remote is reused during configuration, so it
 does not need another full binary allocation. The measured case (6,340 KiB payload,
 13,224 KiB available) now fits an 8,388 KiB requirement. This correction has host
-fixtures; the new complete migration/installation still needs its device run.
+fixtures; the new complete replacement/installation still needs its device run.
 
-Receipts and readiness checks cannot prove audible results, successful authentication, physical USB removal, recovery after a subsequent reboot or every future wake. These remain explicit manual qualification items. The check action runs a prerequisite matrix using the same guards as installation: root, BusyBox, USB mount, persistent UBIFS, pinned firmware/CLI, selected SSH tools, free space, boot ID, atomic storage/publication and native state/helpers. `PREFLIGHT.txt` records every PASS, FAIL or SKIP. Atomic writes are skipped unless root, BusyBox and both storage guards pass. Native inspection can run independently of other failed guards; `NATIVE_RESULT` records its outcome. Use the current report rather than an older snapshot. `DIAGNOSTICS.txt` includes BusyBox identity/applets/option help, mounts, registered filesystems, hook hash, store ownership markers and selected script/snapshot hashes for migration review, without exporting component credentials/configuration.
+Receipts and readiness checks cannot prove audible results, successful authentication, physical USB removal, recovery after a subsequent reboot or every future wake. These remain explicit manual qualification items. The check action runs a prerequisite matrix using the same guards as installation: root, BusyBox, USB mount, persistent UBIFS, pinned firmware/CLI, selected SSH tools, free space, boot ID, atomic storage/publication and native state/helpers. `PREFLIGHT.txt` records every PASS, FAIL or SKIP. Atomic writes are skipped unless root, BusyBox and both storage guards pass. Native inspection can run independently of other failed guards; `NATIVE_RESULT` records its outcome. Use the current report rather than an older snapshot. `DIAGNOSTICS.txt` includes BusyBox identity/applets/option help, mounts, registered filesystems, hook hash, store ownership markers and selected script/snapshot hashes for standalone-removal review, without exporting component credentials/configuration.
+
+</details>
+
+<details>
+<summary>USB filesystem details</summary>
 
 ### Filesystem choice
 
 Use **FAT32** for the canonical process. The test drive was prepared with a 512 MiB FAT32 first partition and the rest unallocated; that size is a conservative test choice, not a demonstrated maximum. The installer is small and does not need exFAT's large-file support.
 
 exFAT is **not qualified**. The second hardware check found no exFAT entry in the live `/proc/filesystems`; it reported `msdos` and `vfat`, and the actual USB mount was writable VFAT. This is a bounded live-kernel observation, not an exFAT mount test. The [Bar 9.1 owner manual](https://th.jbl.com/on/demandware.static/-/Sites-masterCatalog_Harman/default/dw9f4087d6/pdfs/JBL_SB_Bar%209.1_3D_SURROUND_Owner%27s%20Manual_EN.pdf) describes USB service/update use but does not establish exFAT support. The inspected 4.9.134 firmware module tree contains `fat.ko`, `vfat.ko` and `fuse.ko`, with no named exFAT driver found. This does not rule out built-in or userspace support. Qualification would require a separate exFAT automount → AutoScript → writable report → recovery test on the bar. Host exFAT support alone is insufficient; the current installer deliberately rejects non-VFAT device mounts.
+
+</details>
+
+<details>
+<summary>Configuration and advanced operations</summary>
 
 ## Configuration reference
 
@@ -62,7 +150,7 @@ exFAT is **not qualified**. The second hardware check found no exFAT entry in th
 | Key | Values | Behavior |
 | --- | --- | --- |
 | `format` | `1` | Configuration schema version. |
-| `action` | `check`, `update`, `install`, `migrate`, `verify`, `configure`, `uninstall` | Qualification preflight; automatic install/update/migration; explicit install, migration, verification, configuration or recovery. |
+| `action` | `check`, `update`, `install`, `reinstall`, `verify`, `configure`, `uninstall` | Preflight; managed install/update; explicit clean replacement of known standalone setups, verification, configuration or recovery. Deprecated `migrate` only reports that fresh setup is required. |
 | `ssh` | `true`, `false` | Starts/stops the managed SSH listener and its future startup. Port is fixed at `2222`. Existing sessions can remain until reboot. |
 | `web_remote` | `true`, `false` | Enables/disables HTTP and discovery. |
 | `auto_standard` | `true`, `false` | Automatically selects Standard Mode after wake. Independent of HTTP/SSH. |
@@ -73,7 +161,7 @@ exFAT is **not qualified**. The second hardware check found no exFAT entry in th
 | `wifi_ssid_hex` | Optional lowercase UTF-8 hex, 1–32 decoded bytes | Provision this Wi-Fi name. Requires `wifi_psk_hex`. |
 | `wifi_psk_hex` | Optional 64 lowercase hex characters | Derived WPA2 key, generated by the portable setup app. Requires `wifi_ssid_hex`. |
 
-Enabling automatic Standard Mode uses the existing guarded button gesture, not a permanent firmware setting. Disabling automation leaves the current sound mode alone; it does not actively turn Smart Mode on. The existing browser button selects Standard Mode manually. A direct, symmetric Smart Mode on/off switch is not implemented.
+Enabling automatic Standard Mode uses the existing guarded button gesture, not a permanent firmware setting. Disabling automation leaves the current sound mode alone; it does not actively turn Smart Mode on. The existing browser button selects Standard Mode manually. Smart Mode selection remains subject to native state and route guards.
 
 With `smart_mode_memory=true`, the bar comes back in the mode it was left in. The firmware itself always returns to Smart after power-on, so only the existing Standard gesture is needed: it runs after a wake when Standard was the last choice, and nothing is sent when Smart was. The choice is recorded only after the wake is handled, so the bar's own Smart right after wake is never taken for a choice, and a failed wake records nothing. A mode selected from the page or Home Assistant is recorded after five seconds; any other change (physical remote, firmware) only after it has lasted one minute without a standby, because the firmware switches to Smart about 25 seconds before it reports standby after the power button. It is kept in `/var/JBLRemote/smart-mode.json` across standby, mains loss and service restarts. Without a record, Standard is assumed, as with plain `auto_standard`. A mode selected from the page or Home Assistant before the automation acts wins for that wake and is remembered.
 
@@ -93,8 +181,8 @@ The browser page converts passwords to the accepted derived forms locally; do
 not paste plaintext passwords into shell scripts. SSH needs either a valid
 config hash or a bundled hash. Wi-Fi works independently of SSH and uses the
 native supplicant/network manager. Omit both Wi-Fi fields to preserve the current
-connection. The toolkit targets `wlan0`; custom interfaces/names, SSH ports and
-public-key login are not exposed. EQ persistence and sound-at-wake presets are
+connection. Managed SSH selects its LAN interface automatically; Wi-Fi provisioning uses the
+native wireless interface. Custom SSH ports and public-key login are not exposed. EQ persistence and sound-at-wake presets are
 not configurable promises.
 
 ## Change features or collect logs
@@ -105,19 +193,19 @@ To make changes, edit `JBLToolkit/config.txt`, set `action=configure`, and repea
 
 ## Update everything from USB
 
-An existing toolkit with SSH enabled can also use **Network update (SSH)** in the
+An existing toolkit with remote admin access enabled can also use **Network update** in the
 same setup tool. See the [owner workflow](../../../README.md#update-later). It uses
 the same manager and native/storage safeguards from private RAM staging, requires
 a checked managed installation and retains settings and SSH keys. No USB mount is
 required. Physical network-update/reconnect qualification is pending; retain USB
-recovery. Initial installation, legacy migration and settings changes still use USB.
+recovery. Initial installation, clean replacement and settings changes still use USB.
 
 Use the latest USB package and choose **Install / update everything** in
 the portable setup app (`action=update`). Insert it into the powered-on bar and wait five
 minutes. Read `STATUS.txt`, remove the USB, restart and verify as above.
 
-The installer detects a clean bar, a recognized standalone migration source,
-or a managed toolkit. Existing toolkit updates preserve installed feature/network
+The normal update action handles a clean bar or a managed toolkit. Standalone
+setups require explicit clean replacement with new settings. Existing toolkit updates preserve installed feature/network
 settings, SSH credentials and host keys, and sound-state files such as the saved
 bass offset. All bundled application/manager/SSH scripts are updated. JBL firmware
 and vendor libraries remain on the device. Same-package reinsertion exports logs.
@@ -129,12 +217,18 @@ It commits the new package identity after service readiness. Failures after
 replacement starts disable services and attempt recovery; this is not an atomic
 rollback to the previous app. Keep the matching recovery package and inspect the
 status before rebooting. Modified/unknown installations are preserved and refused.
-The new path is host-tested. One recognized standalone migration reached
-`INSTALLED_PENDING_REBOOT_TEST`, and the owner confirmed the updated web interface
-worked before reboot ([device record](../../../models/bar91/validation/usb-update-device.json)).
-Cold boot, managed-to-managed updates and recovery qualification remain pending.
+The new replacement path is host-tested and still needs physical qualification.
+The [historical update record](../../../models/bar91/validation/usb-update-device.json)
+covers the former migration behavior, not this fresh-install helper. Cold boot,
+managed-to-managed updates and recovery qualification remain pending.
+
+</details>
 
 ## Recovery
+
+With the original USB, open **Choose another action**, select **Uninstall** and
+prepare it without formatting. Alternatively, use the matching recovery ZIP as
+described below. Recovery disables the toolkit; it is not a factory reset.
 
 Choose one:
 
@@ -150,39 +244,16 @@ Installed files, credentials, native Wi-Fi profiles and existing SSH sessions ar
 
 ## Existing standalone installations
 
-Normal `install` refuses existing `/var/JBLStandard`, `/var/JBLLocalSSH` or
-`/var/JBLRemote` stores and recognizable leftover startup commands.
+Standalone upgrades are deprecated. Use the
+[automated clean-replacement guide](OLDER-INSTALLATIONS.md): setup checks the
+known older installation, offers **Replace older installation (fresh setup)**,
+then removes recognized services and runs the ordinary installer with your new
+settings and password. Original files remain in a private inactive archive.
 
-**Install / update everything** automatically migrates one reviewed chain
-(explicit `action=migrate` is also available): rev6 Smart Mode or the public `v0.1.0` (rev5) release,
-the known prototype/portable SSH boot script and the recorded standalone remote.
-`check` writes `MIGRATION_CHECK.txt`. Even an eligible legacy chain remains a
-blocker for the advanced first-install-only action; the automatic update action
-selects the reviewed migration path. Before changes,
-migration checks exact owners, scripts, hook snapshots, native prerequisites
-and no-replace publication. It stops only recognized services, lets gesture/boot
-workers finish, then moves the old stores into `/var/JBLToolkitLegacy` on the
-same filesystem without copying their payloads. The original SSH host key is
-retained. A new manager owns the new installation and uses Go wake automation.
-
-The archive is inactive and retained on the bar. Recovery restores the clean
-pre-toolkit baseline; it **does not reactivate the legacy chain**. A failed or
-interrupted migration retains its archive and receipt for review; an owned,
-recognized partial retirement can resume. Unknown scripts, symlinks, changed
-hooks and unrelated live PIDs stop migration. Keep the original installers for
-their own recovery; do not remove unknown stores to force eligibility.
-
-The public `v0.1.0` Smart Mode release installs rev5 (`JBL_STANDARD_HOOK_REV5`), so it is
-not a migration source. `MIGRATION_CHECK.txt` then reports
-`LEGACY_OWNERSHIP_OR_FILE_TYPE_MISMATCH`, even when the SSH and web remote files match.
-Remove that chain in the standalone order below.
-
-For other chains, use the original [standalone removal order](STANDALONE.md#remove-or-recover): web remote → SSH → Smart Mode. Standalone removers can retain files. Preserve those directories outside active paths and verify the original hook is restored before installation. This remains developer-controlled work requiring access and recovery.
-
-**Restart the bar after the last remover and before installing.** A standalone SSH
-server keeps listening on port 2222 until the bar restarts, even after its files are
-removed. The new SSH step then fails with `SSH_INSTALL_FAILED`, and `sshd.log` shows
-`Bind to port 2222 ... failed: Address already in use`.
+The helper accepts only pinned known setups. Unknown files, modified hooks and
+unsupported combinations need their original removal route. Keep recovery files;
+never delete stores to bypass a check. After manual removal, restart the bar
+before installing so an old admin listener cannot retain port 2222.
 
 ## If an installation fails
 
@@ -240,7 +311,9 @@ Read `JBLToolkit/STATUS.txt` and the newest `RESULT=... EXIT=...` entry in `setu
 | `PREFLIGHT_FAILED_CHECK_FIRMWARE_STORAGE_AND_NATIVE_SSH` | No installation changes: read `PREFLIGHT_REASON` in `setup.log` for the failed firmware/CLI, UBIFS, BusyBox, free-space or native SSH guard. Preserve checks. |
 | `PREFLIGHT_REASON=SSH_PORT_2222_IN_USE_RESTART_BAR_FIRST` | Another process listens on port 2222, usually the SSH server of a standalone installation you removed or moved aside. It keeps running until the bar restarts. Restart the bar, then insert the same USB again. No installation changes were made. |
 | `SSH_CREDENTIALS_NOT_BUNDLED` | Add your derived SSH credential through the setup app/config, or use the original bundled private hash. There is no shared/default password. |
-| `MIGRATION_SSH_CREDENTIALS_REQUIRED_NO_CHANGES` | Migration with SSH selected needs your config/bundled hash before any legacy service is disabled. |
+| `REINSTALL_SSH_CREDENTIALS_REQUIRED_NO_CHANGES` | Choose an admin password in setup before replacing the old installation. Nothing was removed. |
+| `LEGACY_INSTALLATION_REQUIRES_FRESH_SETUP` | Run Check first, then use the [clean-replacement guide](OLDER-INSTALLATIONS.md). Old settings are not upgraded in place. |
+| `REINSTALL_IDENTITY_FAILED_NO_CHANGES` | The older files or hook are unknown/modified. Keep them and use their original removal route. |
 | `TOOLKIT_DISABLED_USE_CONFIGURE_OR_RECOVER` | A prior failure/recovery disabled startup. Read logs, then explicitly configure or recover. Passive reinsertion does not clear the guard. |
 | `REMOTE_NOT_READY` / `REMOTE_EXITED_DURING_STARTUP` | Read `setup.log` and retained `/var/JBLRemote/remote.log`. Startup is disabled on failure. |
 | `SSH_INSTALL_FAILED` | Inspect `setup.log` and retained SSH staging logs; do not treat a listening socket as a successful login. Wi-Fi changes may already have occurred. |
@@ -251,6 +324,9 @@ Read `JBLToolkit/STATUS.txt` and the newest `RESULT=... EXIT=...` entry in `setu
 If no entry log appears, check the USB root, FAT32 and first partition. The soundbar must finish booting and be fully on for the normal install. A global operation lock prevents installation/configuration from overlapping boot's bounded SSH wait. Let it finish before reinsertion. A hard power interruption can leave a stale `/tmp` lock until reboot. Some bars run AutoScript only while booting, never on insertion: unplug mains, insert the USB, reconnect, and turn the bar on within about three minutes. Check, install and configure wait that long for the bar to report On.
 
 Logs can contain SSIDs, addresses, host keys and device information. Review before sharing. Password hashes and derived Wi-Fi keys are never included in the toolkit's routine `logs/` export. Keep full private packages and captures out of issues.
+
+<details>
+<summary>Installer architecture and qualification evidence</summary>
 
 ## Architecture
 
@@ -265,3 +341,15 @@ SSH reuses its existing guarded installer with a private input directory and an 
 Recovery uses only the USB recovery scripts and recorded ownership/snapshots. It does not depend on an intact installed manager, valid configuration, running SSH or a working remote executable. Unknown hooks/processes are preserved. One shared boot/installation lock prevents configuration while the SSH boot worker is still waiting for networking.
 
 Host checks cover the real ARM build/package, credential handling, the actual config parser, managed startup/readiness using a host executable, safe reinsertion, explicit configuration, failure recovery and exact hook restoration. Native firmware, SSH authentication and Wi-Fi are fixture boundaries. Before publishing a combined release, qualify on a clean supported bar: all feature combinations, Wi-Fi persistence, USB-free mains boot, standby/CEC wake, interrupted installation, changed-hook recovery, SSH/SFTP, normal controls and rollback. Keep the established `v0.1.0` Smart Mode release unchanged.
+
+
+### Qualification for the new fixes
+
+| Scenario | Host evidence | Physical qualification |
+| --- | --- | --- |
+| Windows RAW/MBR/GPT formatting and failure reporting | Production script with mocked storage cmdlets; elevated result tests | USB formatting and UAC pending |
+| Wired/Wi-Fi address selection | Go selectors and executed BusyBox shell fixtures | Ethernet-only, Wi-Fi-only and dual-connected cold boots pending |
+| Known standalone removal and fresh install | Executed shell fixtures; new settings/identity and archive/recovery checks | Physical replacement pending |
+| Setup recommendations and editable defaults | Production browser assets against fixture API | User walkthrough pending |
+
+</details>
