@@ -6,9 +6,11 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -323,11 +325,170 @@ def installer_tests():
             passed("installer_" + case)
 
 
+def follow_tests():
+    # The actual boot helper against fixture addresses and a stand-in daemon.
+    # Only the namespace launch, listener confirmation and daemon identity are
+    # stubs; selection changes, locking, statuses and stop rules are real.
+    def state(pid):
+        try:
+            return Path("/proc/" + str(pid) + "/stat").read_text().rsplit(") ", 1)[1].split()[0]
+        except (OSError, IndexError):
+            return ""
+
+    def alive(pid):
+        return state(pid) not in ("", "Z")
+
+    def until(condition, label):
+        deadline = time.monotonic() + 20
+        while not condition():
+            assert time.monotonic() < deadline, label
+            time.sleep(0.02)
+
+    for case in ("moved", "disabled", "replaced", "retried", "abandoned"):
+        with tempfile.TemporaryDirectory(prefix="jbl-ssh-follow-") as tmp:
+            folder = Path(tmp)
+            store, ram = folder / "store", folder / "ram"
+            store.mkdir()
+            ram.mkdir()
+            polls, daemons = folder / "polls", folder / "daemons"
+            wrapper = folder / "busybox"
+            wrapper.write_text('''#!/bin/sh
+case "$1" in
+    sleep) echo >> "''' + str(polls) + '''"; exec sleep 0.05;;
+    unshare)
+        echo "$$" >> "''' + str(daemons) + '''"
+        echo "$$" > "$JBL_SSH_STORE/sshd.pid"
+        exec sleep 60;;
+    *) exec ''' + BB + ''' "$@";;
+esac
+''')
+            wrapper.chmod(0o700)
+            for name in ("boot.sh", "common.sh"):
+                source = (ROOT / "models/bar91/ssh" / name).read_text()
+                source = source.replace("/var/JBLLocalSSH", str(store)).replace("/tmp/jbl-local-ssh", str(ram / "lock"))
+                (store / name).write_text(source)
+            with (store / "common.sh").open("a") as common:
+                common.write('''
+verify_tools() { return 0; }
+prepare_privsep() { return 0; }
+find_address() { "$BB" cat "$STORE/fixture-address"; }
+daemon_running() {
+    pid=$("$BB" cat "$STORE/sshd.pid" 2>/dev/null) && [ -n "$pid" ] &&
+        [ -n "$("$BB" tr '\\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" ]
+}
+wait_listener() {
+    refusals=$("$BB" cat "$STORE/fixture-refusals")
+    if [ "$refusals" -gt 0 ]; then
+        echo $((refusals - 1)) > "$STORE/fixture-refusals"
+        return 1
+    fi
+    confirmed=0
+    while [ "$("$BB" cat "$STORE/sshd.pid" 2>/dev/null)" != "$1" ]; do
+        [ "$confirmed" -lt 100 ] || return 1
+        "$BB" sleep 1
+        confirmed=$((confirmed + 1))
+    done
+}
+''')
+            (store / "OWNER.txt").write_text("JBL_LOCAL_SSH_REV1\n")
+            (store / "settings.conf").write_text("ALLOWED_PC=192.168.1.0/24\nINTERFACE=auto\nAUTOSTART=1\n")
+            (store / "sshd_config").write_text("Port 2222\nListenAddress 192.168.1.40\nUseDNS no\n")
+            (store / "host_fingerprint.txt").write_text("256 SHA256:disposable-fixture root@fixture (ED25519)\n")
+            (store / "fixture-refusals").write_text("0\n")
+            for name in ("namespace.sh", "session.sh", "passwd", "nsswitch.conf", "ld.so.preload", "host_ed25519", "host_ed25519.pub"):
+                (store / name).write_text("disposable-fixture\n")
+            read = lambda name: (store / name).read_text().strip()
+            daemon = lambda: int(read("sshd.pid"))
+            poll_count = lambda: polls.stat().st_size if polls.exists() else 0
+
+            def idle():
+                seen = poll_count()
+                time.sleep(0.5)
+                return poll_count() == seen
+
+            def polled(count):
+                target = poll_count() + count
+                until(lambda: poll_count() >= target, "follower stopped polling")
+
+            replacement = None
+            try:
+                (store / "fixture-address").write_text("192.168.1.40\n")
+                env = dict(os.environ, JBL_BUSYBOX=str(wrapper), JBL_SSH_STORE=str(store))
+                result = run(["/bin/sh", str(store / "boot.sh")], env=env)
+                assert result.returncode == 0 and read("BOOT_STATUS.txt") == "SSH_READY", (result.stderr, read("boot.log"))
+                first = daemon()
+                assert alive(first) and read("listen-address") == "192.168.1.40"
+                assert not (ram / "lock-boot-lock").exists()
+                if case == "moved":
+                    (store / "fixture-address").write_text("192.168.1.9\n")
+                    until(lambda: "FOLLOW=LISTENER_MOVED" in read("boot.log"), read("boot.log"))
+                    second = daemon()
+                    assert second != first and alive(second) and not alive(first)
+                    assert read("listen-address") == "192.168.1.9" and read("BOOT_STATUS.txt") == "SSH_READY"
+                    assert read("sshd_config").splitlines() == ["Port 2222", "ListenAddress 192.168.1.9", "UseDNS no"]
+                    assert "IP=192.168.1.9" in read("connection.txt").splitlines()
+                    assert not (ram / "lock-boot-lock").exists()
+                    passed("follow_moves_listener_when_selected_lan_address_changes")
+                    # No LAN is not a reason to drop the listener: its address may return.
+                    (store / "fixture-address").write_text("")
+                    polled(6)
+                    assert daemon() == second and alive(second) and read("listen-address") == "192.168.1.9"
+                    passed("follow_keeps_listener_while_no_lan_address_is_selected")
+                    os.kill(second, signal.SIGTERM)
+                    until(idle, "follower outlived a stopped listener")
+                    (store / "fixture-address").write_text("192.168.1.40\n")
+                    time.sleep(0.5)
+                    assert daemon() == second and not alive(second) and read("listen-address") == "192.168.1.9"
+                    passed("follow_never_restarts_a_stopped_listener")
+                elif case in ("disabled", "replaced"):
+                    if case == "disabled":
+                        (store / "BOOT_DISABLED").write_text("JBL_LOCAL_SSH_REV1\n")
+                    else:
+                        replacement = subprocess.Popen(["sleep", "60"])
+                        (store / "sshd.pid").write_text(str(replacement.pid) + "\n")
+                    until(idle, "follower outlived a " + case + " listener")
+                    (store / "fixture-address").write_text("192.168.1.9\n")
+                    time.sleep(0.5)
+                    assert alive(first) and read("listen-address") == "192.168.1.40"
+                    assert len(daemons.read_text().split()) == 1
+                    passed("follow_leaves_" + case + "_listener_alone")
+                else:
+                    (store / "fixture-refusals").write_text("1\n" if case == "retried" else "9\n")
+                    (store / "fixture-address").write_text("192.168.1.9\n")
+                    if case == "retried":
+                        until(lambda: "FOLLOW=LISTENER_MOVED" in read("boot.log"), read("boot.log"))
+                        assert read("boot.log").count("FOLLOW=SSH_LISTENER_NOT_CONFIRMED") == 1
+                        started = [int(pid) for pid in daemons.read_text().split()]
+                        assert len(started) == 3 and daemon() == started[2] and alive(started[2])
+                        assert not alive(started[0]) and not alive(started[1])
+                        assert read("listen-address") == "192.168.1.9" and read("BOOT_STATUS.txt") == "SSH_READY"
+                        passed("follow_retries_after_an_unconfirmed_listener")
+                    else:
+                        until(lambda: read("fixture-refusals") == "6", read("boot.log"))
+                        until(idle, "follower kept retrying")
+                        assert read("boot.log").count("FOLLOW=SSH_LISTENER_NOT_CONFIRMED") == 3
+                        assert read("fixture-refusals") == "6" and read("BOOT_STATUS.txt") == "SSH_LISTENER_NOT_CONFIRMED"
+                        started = [int(pid) for pid in daemons.read_text().split()]
+                        assert len(started) == 4 and not any(alive(pid) for pid in started)
+                        assert not (ram / "lock-boot-lock").exists()
+                        passed("follow_stops_after_three_unconfirmed_listeners")
+            finally:
+                (store / "BOOT_DISABLED").write_text("JBL_LOCAL_SSH_REV1\n")
+                for pid in daemons.read_text().split() if daemons.exists() else ():
+                    if alive(pid):
+                        os.kill(int(pid), signal.SIGTERM)
+                if replacement is not None:
+                    replacement.kill()
+                    replacement.wait()
+                until(idle, "follower still running")
+
+
 crypt_test()
 archive_tests()
 hook_tests()
 address_tests()
 installer_tests()
+follow_tests()
 for script in (ROOT / "models/bar91/ssh").glob("*.sh"):
     result = run([BB, "sh", "-n", str(script)])
     assert result.returncode == 0, (script.name, result.stderr)
@@ -338,6 +499,6 @@ passed("shell_syntax_and_no_embedded_password_hashes_keys_or_binaries")
 out = ROOT / "build/test-results"
 out.mkdir(parents=True, exist_ok=True)
 (out / "ssh-tests.json").write_text(json.dumps({
-    "scope": "Host fixtures: per-owner builder, integrity, CIDR selection, actual hook transaction/rollback, active installation upgrade and bounded boot failure. Native binaries and physical reboot not exercised.",
+    "scope": "Host fixtures: per-owner builder, integrity, CIDR selection, actual hook transaction/rollback, active installation upgrade, bounded boot failure and listener moves after LAN address changes with a stand-in daemon. Native binaries and physical reboot not exercised.",
     "cases": cases,
 }, indent=2) + "\n")

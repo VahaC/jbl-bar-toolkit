@@ -81,9 +81,13 @@ chains are preserved for their original removal route.
 
 Managed SSH and local discovery automatically select an active private address
 inside the configured LAN, on Ethernet or Wi-Fi. Both use interface-name then
-numeric-address order, excluding loopback and the setup hotspot. SSH selects at
-service startup; discovery follows address changes. A network update preserves
-its current SSH listener until restart. Standalone explicit interfaces still work.
+numeric-address order, excluding loopback and the setup hotspot. Both follow
+address changes: after startup SSH checks the selection every five seconds and
+moves its listener once a new address is seen twice, for example when the bar
+releases Wi-Fi for a wired link or a cable is connected later. A listener
+stopped by setup, recovery or the owner is never started again. A USB install
+selects once and follows from the next restart. A network update preserves its
+current SSH listener until restart. Standalone explicit interfaces still work.
 
 The formatting and LAN selection fixes follow **@VahaC**'s diagnoses and suggested
 approaches in [#58](https://github.com/kisinga/jbl-bar-toolkit/issues/58) and
@@ -349,6 +353,7 @@ Host checks cover the real ARM build/package, credential handling, the actual co
 | --- | --- | --- |
 | Windows RAW/MBR/GPT formatting and failure reporting | Production script with mocked storage cmdlets; elevated result tests | USB formatting and UAC pending |
 | Wired/Wi-Fi address selection | Go selectors and executed BusyBox shell fixtures | Ethernet-only, Wi-Fi-only and dual-connected cold boots pending |
+| SSH listener following address changes | Executed boot helper with fixture addresses and a stand-in daemon | @VahaC, firmware 23.06.41.80: Wi-Fi to Ethernet (port open after 7-9 s) and Ethernet to Wi-Fi (7 s) without restart; cold boots on Wi-Fi and with Ethernet connected and Wi-Fi configured (port open on the wired address at 14 s uptime) |
 | Known standalone removal and fresh install | Executed shell fixtures; new settings/identity and archive/recovery checks | Physical replacement pending |
 | Setup recommendations and editable defaults | Production browser assets against fixture API | User walkthrough pending |
 
