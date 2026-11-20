@@ -81,6 +81,9 @@ follow_address() {
         "$BB" mkdir "$LOCK" 2>/dev/null || continue
         move_listener "$next"
         moved=$?
+        # A daemon started by an abandoned move is stopped before the lock is
+        # released: a waiting reinstall must never see its files still in use.
+        [ "$moved" = 0 ] || stop_listener
         "$BB" rmdir "$LOCK"
         case "$moved" in
             0)
@@ -89,12 +92,9 @@ follow_address() {
                 printf 'SSH_READY\n' > "$STORE/BOOT_STATUS.txt"
                 printf 'FOLLOW=LISTENER_MOVED\n';;
             2)
-                stop_listener
                 printf 'FOLLOW=DISABLED\n'
                 return 0;;
             *)
-                # No half-started daemon may outlive a failed attempt.
-                stop_listener
                 current=
                 failures=$((failures + 1))
                 printf '%s\n' "$reason" > "$STORE/BOOT_STATUS.txt"

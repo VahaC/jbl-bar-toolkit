@@ -344,14 +344,15 @@ def follow_tests():
             assert time.monotonic() < deadline, label
             time.sleep(0.02)
 
-    for case in ("moved", "disabled", "replaced", "retried", "abandoned"):
+    for case in ("moved", "disabled", "replaced", "retried", "abandoned", "disabled_during_move"):
         with tempfile.TemporaryDirectory(prefix="jbl-ssh-follow-") as tmp:
             folder = Path(tmp)
             store, ram = folder / "store", folder / "ram"
             store.mkdir()
             ram.mkdir()
-            polls, daemons = folder / "polls", folder / "daemons"
+            polls, daemons, releases = folder / "polls", folder / "daemons", folder / "releases"
             wrapper = folder / "busybox"
+            # Every lock release records the stand-in daemons still running then.
             wrapper.write_text('''#!/bin/sh
 case "$1" in
     sleep) echo >> "''' + str(polls) + '''"; exec sleep 0.05;;
@@ -359,6 +360,12 @@ case "$1" in
         echo "$$" >> "''' + str(daemons) + '''"
         echo "$$" > "$JBL_SSH_STORE/sshd.pid"
         exec sleep 60;;
+    rmdir)
+        for pid in $(''' + BB + ''' cat "''' + str(daemons) + '''" 2>/dev/null); do
+            state=$(''' + BB + ''' awk '{sub(/^.*\\) /, ""); print $1}' "/proc/$pid/stat" 2>/dev/null)
+            case "$state" in ''|Z) ;; *) echo "$pid" >> "''' + str(releases) + '''";; esac
+        done
+        exec ''' + BB + ''' "$@";;
     *) exec ''' + BB + ''' "$@";;
 esac
 ''')
@@ -388,6 +395,7 @@ wait_listener() {
         "$BB" sleep 1
         confirmed=$((confirmed + 1))
     done
+    [ ! -e "$STORE/fixture-disable" ] || "$BB" cp "$STORE/OWNER.txt" "$STORE/BOOT_DISABLED"
 }
 ''')
             (store / "OWNER.txt").write_text("JBL_LOCAL_SSH_REV1\n")
@@ -400,6 +408,7 @@ wait_listener() {
             read = lambda name: (store / name).read_text().strip()
             daemon = lambda: int(read("sshd.pid"))
             poll_count = lambda: polls.stat().st_size if polls.exists() else 0
+            released_with = lambda: [int(pid) for pid in releases.read_text().split()]
 
             def idle():
                 seen = poll_count()
@@ -427,7 +436,7 @@ wait_listener() {
                     assert read("listen-address") == "192.168.1.9" and read("BOOT_STATUS.txt") == "SSH_READY"
                     assert read("sshd_config").splitlines() == ["Port 2222", "ListenAddress 192.168.1.9", "UseDNS no"]
                     assert "IP=192.168.1.9" in read("connection.txt").splitlines()
-                    assert not (ram / "lock-boot-lock").exists()
+                    assert released_with() == [first, second] and not (ram / "lock-boot-lock").exists()
                     passed("follow_moves_listener_when_selected_lan_address_changes")
                     # No LAN is not a reason to drop the listener: its address may return.
                     (store / "fixture-address").write_text("")
@@ -452,6 +461,16 @@ wait_listener() {
                     assert alive(first) and read("listen-address") == "192.168.1.40"
                     assert len(daemons.read_text().split()) == 1
                     passed("follow_leaves_" + case + "_listener_alone")
+                elif case == "disabled_during_move":
+                    # Setup disables the service while the new listener starts.
+                    (store / "fixture-disable").write_text("1\n")
+                    (store / "fixture-address").write_text("192.168.1.9\n")
+                    until(lambda: "FOLLOW=DISABLED" in read("boot.log"), read("boot.log"))
+                    until(idle, "follower outlived a disabled move")
+                    started = [int(pid) for pid in daemons.read_text().split()]
+                    assert len(started) == 2 and not any(alive(pid) for pid in started)
+                    assert released_with() == [first] and not (ram / "lock-boot-lock").exists()
+                    passed("follow_stops_new_listener_before_unlocking_a_disabled_move")
                 else:
                     (store / "fixture-refusals").write_text("1\n" if case == "retried" else "9\n")
                     (store / "fixture-address").write_text("192.168.1.9\n")
@@ -462,6 +481,8 @@ wait_listener() {
                         assert len(started) == 3 and daemon() == started[2] and alive(started[2])
                         assert not alive(started[0]) and not alive(started[1])
                         assert read("listen-address") == "192.168.1.9" and read("BOOT_STATUS.txt") == "SSH_READY"
+                        # The unconfirmed daemon was gone before its lock release.
+                        assert released_with() == [started[0], started[2]]
                         passed("follow_retries_after_an_unconfirmed_listener")
                     else:
                         until(lambda: read("fixture-refusals") == "6", read("boot.log"))
@@ -470,7 +491,7 @@ wait_listener() {
                         assert read("fixture-refusals") == "6" and read("BOOT_STATUS.txt") == "SSH_LISTENER_NOT_CONFIRMED"
                         started = [int(pid) for pid in daemons.read_text().split()]
                         assert len(started) == 4 and not any(alive(pid) for pid in started)
-                        assert not (ram / "lock-boot-lock").exists()
+                        assert released_with() == [first] and not (ram / "lock-boot-lock").exists()
                         passed("follow_stops_after_three_unconfirmed_listeners")
             finally:
                 (store / "BOOT_DISABLED").write_text("JBL_LOCAL_SSH_REV1\n")
