@@ -4,6 +4,10 @@ User-facing changes go here. Before publishing another release, change the root
 `VERSION` file and add a matching `## <version>` section. Release notes are
 generated from that section plus the installation and recovery instructions.
 
+## Unreleased
+
+- Keep SSH reachable when the soundbar changes its network address after startup, such as releasing Wi-Fi for Ethernet during boot or when a cable is connected later.
+
 ## 0.3.0-dev.12
 
 - Fix Windows USB preparation for already initialized disks and show detailed failures from elevated formatting.
