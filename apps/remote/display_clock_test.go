@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -221,5 +224,41 @@ func TestClockWithTheBarOnWhenAlways(t *testing.T) {
 	waitClock(t, f, true, 10*time.Second)
 	if f.read(vfdLevel3) != vfdLevel3None {
 		t.Fatal("standby screen not lifted")
+	}
+}
+
+// With the bar's own process away (starting, stuck on "Starting"), the clock
+// polls five times a second: its error is written once, then once that it
+// works again, not on every poll.
+func TestClockWritesAnUnreadableBarOnce(t *testing.T) {
+	f, m, stopDisplay := startDisplay(t, vfdLevel3StandbyBlank)
+	defer stopDisplay()
+	var mu sync.Mutex
+	var lines []string
+	logf := func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, fmt.Sprintf(format, args...))
+	}
+	c := newDisplayClock(m, f, filepath.Join(t.TempDir(), "clock.json"), logf)
+	if err := c.Set(clockOn(clockStandby)); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.stepErr = errors.New("soundbar is starting")
+	f.mu.Unlock()
+	for range 20 {
+		c.tick()
+	}
+	f.mu.Lock()
+	f.stepErr = nil
+	f.mu.Unlock()
+	for range 3 {
+		c.tick()
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(lines, "|") != "Display clock: soundbar is starting|Display clock: working again" {
+		t.Fatalf("log: %q", lines)
 	}
 }
