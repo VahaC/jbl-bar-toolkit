@@ -4,29 +4,37 @@ BB=/bin/busybox
 VENDOR_DIRS='/usr/local/bin /usr/bin /usr/local/sbin /usr/sbin'
 FIRMWARE_DIRS='/bin /sbin'
 # Private per-boot cache in RAM. Symlinks must stay out of the SSH store:
-# toolkit updates refuse a component store that contains any.
-APPLETS=/tmp/jbl-local-ssh-applets
+# toolkit updates refuse a component store that contains any. The suffix is
+# the selection rules' version: bump it whenever they change, so an update
+# without a reboot builds a new cache instead of reusing a stale one.
+APPLETS=/tmp/jbl-local-ssh-applets.2
 LD_LIBRARY_PATH=/system/bdplib:/system/usr/lib:/system/usr/local/lib
 LD_PRELOAD=
 
+# Programs built for the system hard-float glibc 2.27 loader.
+HARD_FLOAT_LOADER=/lib/ld-linux-armhf.so.3
+
 # In this SSH namespace the default ELF interpreter is the vendor 2.18 loader
 # (namespace.sh), and the library path above is the vendor runtime. Firmware
-# executables in /bin and /sbin (Android toolbox applets and others) belong
-# to another C runtime and crash here, while BusyBox works. A command that
-# would otherwise reach /bin or /sbin, directly or through a vendor-directory
-# symlink, therefore runs as a BusyBox applet. Real vendor utilities keep
-# precedence and their library environment.
+# executables in /bin and /sbin (Android toolbox applets and others) and
+# hard-float programs in the vendor directories (such as /usr/bin/awk, a link
+# to gawk) belong to another C runtime and crash here, while BusyBox works.
+# Such a command therefore runs as a BusyBox applet when BusyBox has one.
+# Real vendor utilities keep precedence and their library environment.
+hard_float() {
+    "$BB" dd if="$1" bs=4096 count=1 2>/dev/null | "$BB" grep -q "$HARD_FLOAT_LOADER"
+}
 vendor_command() {
     for dir in $VENDOR_DIRS; do
         file=$dir/$1
         [ -f "$file" ] && [ -x "$file" ] || continue
-        [ -L "$file" ] || return 0
         real=$("$BB" readlink -f "$file") || return 1
         [ "$real" != "$busybox_real" ] || return 0
         for top in $firmware_real; do
             case "$real" in "$top"/*) return 1;; esac
         done
-        return 0
+        ! hard_float "$real"
+        return
     done
     return 1
 }

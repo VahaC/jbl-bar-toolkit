@@ -271,7 +271,13 @@ def session_tests():
         for name in ("cat", "dd", "od", "pidof", "date", "clear", "toolbox-only"):
             (root / "bin" / name).symlink_to("toolbox")
         (root / "sbin/ifconfig").symlink_to("../bin/toolbox")
-        (root / "usr/bin/awk").symlink_to("../../bin/toolbox")
+        # Hard-float program in a vendor directory (/usr/bin/awk -> gawk on the bar):
+        # it names the system armhf loader and crashes with the vendor libraries.
+        (root / "system/usr/bin").mkdir(parents=True)
+        gawk = root / "system/usr/bin/gawk"
+        gawk.write_text("#!/bin/sh\n# interpreter /lib/ld-linux-armhf.so.3\necho 'Segmentation fault' >&2\nexit 139\n")
+        gawk.chmod(0o755)
+        (root / "usr/bin/awk").symlink_to("../../system/usr/bin/gawk")
         (root / "usr/bin/sort").symlink_to("../../bin/busybox")
         for name, folder in (("top", "usr/bin"), ("ssh-keygen", "usr/local/bin")):
             path = root / folder / name
@@ -285,7 +291,7 @@ def session_tests():
             ("VENDOR_DIRS='/usr/local/bin /usr/bin /usr/local/sbin /usr/sbin'",
              "VENDOR_DIRS='" + " ".join(str(root / d) for d in ("usr/local/bin", "usr/bin", "usr/local/sbin", "usr/sbin")) + "'"),
             ("FIRMWARE_DIRS='/bin /sbin'", "FIRMWARE_DIRS='" + str(root / "bin") + " " + str(root / "sbin") + "'"),
-            ("APPLETS=/tmp/jbl-local-ssh-applets", "APPLETS=" + str(applets)),
+            ("APPLETS=/tmp/jbl-local-ssh-applets.2", "APPLETS=" + str(applets)),
         ):
             assert source.count(old) == 1, old
             source = source.replace(old, new)
@@ -325,11 +331,13 @@ def session_tests():
 
         # Later sessions reuse the per-boot cache, interactively as well.
         (applets / "reuse-marker").write_text("")
-        result = session_run({}, stdin="cat " + data + "\ncommand -v od\nexit\n")
+        # Distribution BusyBox builds print a banner and, depending on the
+        # build, the prompt on stdout; the bar's prints neither. Mark the
+        # command output so only it is compared.
+        result = session_run({"PS1": ""}, stdin="echo '<'$(cat " + data + ")'>'\necho '<'$(command -v od)'>'\nexit\n")
         assert result.returncode == 0, result.stderr
-        # Distribution BusyBox builds print an interactive banner; the bar's does not.
-        output = re.sub(r"BusyBox v[^\n]*\nEnter 'help'[^\n]*\n", "", result.stdout)
-        assert output.split() == ["data-ok", str(applets / "od")], (result.stdout, result.stderr)
+        output = re.findall(r"<([^<>\n]*)>", result.stdout)
+        assert output == ["data-ok", str(applets / "od")], (result.stdout, result.stderr)
         assert (applets / "reuse-marker").exists()
         passed("interactive_session_reuses_applet_cache")
 
