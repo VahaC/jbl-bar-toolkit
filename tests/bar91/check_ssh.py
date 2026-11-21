@@ -253,6 +253,98 @@ esac
         passed("lan_selection_requires_operational_link_despite_retained_addresses")
 
 
+def session_tests():
+    # Firmware layout fixture: /bin and /sbin hold BusyBox plus applets of a
+    # foreign C runtime that crash under the SSH namespace's vendor loader;
+    # vendor directories hold native utilities and links into both.
+    applets_wanted = ("cat", "dd", "od", "awk", "pidof", "date", "clear", "top", "ifconfig", "sort")
+    available = set(run([BB, "--list"]).stdout.split())
+    assert set(applets_wanted) <= available, sorted(set(applets_wanted) - available)
+    with tempfile.TemporaryDirectory(prefix="jbl-ssh-session-") as tmp:
+        root = Path(tmp).resolve()
+        for name in ("bin", "sbin", "usr/bin", "usr/sbin", "usr/local/bin", "usr/local/sbin", "ram"):
+            (root / name).mkdir(parents=True)
+        (root / "bin/busybox").symlink_to(BB)
+        toolbox = root / "bin/toolbox"
+        toolbox.write_text("#!/bin/sh\necho 'Segmentation fault' >&2\nexit 139\n")
+        toolbox.chmod(0o755)
+        for name in ("cat", "dd", "od", "pidof", "date", "clear", "toolbox-only"):
+            (root / "bin" / name).symlink_to("toolbox")
+        (root / "sbin/ifconfig").symlink_to("../bin/toolbox")
+        (root / "usr/bin/awk").symlink_to("../../bin/toolbox")
+        (root / "usr/bin/sort").symlink_to("../../bin/busybox")
+        for name, folder in (("top", "usr/bin"), ("ssh-keygen", "usr/local/bin")):
+            path = root / folder / name
+            path.write_text('#!/bin/sh\necho "vendor-' + name + ' $LD_LIBRARY_PATH"\n')
+            path.chmod(0o755)
+        (root / "data.txt").write_text("data-ok\n")
+        applets = root / "ram/applets"
+        source = (ROOT / "models/bar91/ssh/session.sh").read_text()
+        for old, new in (
+            ("BB=/bin/busybox", "BB=" + str(root / "bin/busybox")),
+            ("VENDOR_DIRS='/usr/local/bin /usr/bin /usr/local/sbin /usr/sbin'",
+             "VENDOR_DIRS='" + " ".join(str(root / d) for d in ("usr/local/bin", "usr/bin", "usr/local/sbin", "usr/sbin")) + "'"),
+            ("FIRMWARE_DIRS='/bin /sbin'", "FIRMWARE_DIRS='" + str(root / "bin") + " " + str(root / "sbin") + "'"),
+            ("APPLETS=/tmp/jbl-local-ssh-applets", "APPLETS=" + str(applets)),
+        ):
+            assert source.count(old) == 1, old
+            source = source.replace(old, new)
+        session = root / "session.sh"
+        session.write_text(source)
+        vendor_lib = "/system/bdplib:/system/usr/lib:/system/usr/local/lib"
+        data = str(root / "data.txt")
+        command = "; ".join((
+            "cat " + data, "dd if=" + data + " 2>/dev/null", "printf A | od -An -c",
+            "echo x | awk '{print \"awk-ok\"}'", "pidof no-such-process; echo pidof=$?",
+            "date +%Y | grep -Eq '^[0-9]{4}$' && echo date-ok", "clear >/dev/null && echo clear-ok",
+            "ifconfig lo >/dev/null 2>&1; echo ifconfig=$?", "printf 'b\\na\\n' | sort | tr -d '\\n'; echo",
+            "top", "ssh-keygen", "for c in cat awk sort top ifconfig toolbox-only; do command -v $c; done",
+        ))
+        base = {"PATH": "/usr/bin:/bin", "HOME": str(root)}
+
+        def session_run(extra, stdin=None):
+            return subprocess.run([BB, "sh", str(session)], env=dict(base, **extra), input=stdin,
+                                  capture_output=True, text=True, timeout=25)
+
+        expected = [
+            "data-ok", "data-ok", "A", "awk-ok", "pidof=1", "date-ok", "clear-ok", "ifconfig=0", "ab",
+            "vendor-top " + vendor_lib, "vendor-ssh-keygen " + vendor_lib,
+            str(applets / "cat"), str(applets / "awk"), str(root / "usr/bin/sort"),
+            str(root / "usr/bin/top"), str(applets / "ifconfig"), str(root / "bin/toolbox-only"),
+        ]
+        result = session_run({"SSH_ORIGINAL_COMMAND": command})
+        lines = [line.strip() for line in result.stdout.splitlines()]
+        assert result.returncode == 0 and lines == expected, (lines, result.stderr)
+        assert "Segmentation fault" not in result.stderr, result.stderr
+        assert applets.is_dir() and not applets.is_symlink() and applets.stat().st_mode & 0o777 == 0o700
+        assert os.readlink(applets / "awk") == str(root / "bin/busybox")
+        for kept in ("top", "sort", "ssh-keygen", "toolbox-only"):
+            assert not os.path.lexists(applets / kept), kept
+        assert sorted(p.name for p in (root / "ram").iterdir()) == ["applets"]
+        passed("session_runs_firmware_commands_as_busybox_applets_and_keeps_vendor_utilities")
+
+        # Later sessions reuse the per-boot cache, interactively as well.
+        (applets / "reuse-marker").write_text("")
+        result = session_run({}, stdin="cat " + data + "\ncommand -v od\nexit\n")
+        assert result.returncode == 0, result.stderr
+        # Distribution BusyBox builds print an interactive banner; the bar's does not.
+        output = re.sub(r"BusyBox v[^\n]*\nEnter 'help'[^\n]*\n", "", result.stdout)
+        assert output.split() == ["data-ok", str(applets / "od")], (result.stdout, result.stderr)
+        assert (applets / "reuse-marker").exists()
+        passed("interactive_session_reuses_applet_cache")
+
+        # A cache path this session did not create is never adopted; the
+        # shell still starts with the vendor-first PATH.
+        shutil.rmtree(applets)
+        applets.write_text("foreign\n")
+        result = session_run({"SSH_ORIGINAL_COMMAND": "command -v cat; ssh-keygen; echo $PATH"})
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines()[:2] == [str(root / "bin/cat"), "vendor-ssh-keygen " + vendor_lib]
+        assert str(applets) not in result.stdout.splitlines()[2]
+        assert applets.read_text() == "foreign\n"
+        passed("session_starts_without_foreign_applet_cache")
+
+
 def installer_tests():
     # Actual control flow and hooks, adapted to isolated temp paths. Only root
     # metadata, native-tool checks and live-daemon detection are fixture stubs.
@@ -508,6 +600,7 @@ crypt_test()
 archive_tests()
 hook_tests()
 address_tests()
+session_tests()
 installer_tests()
 follow_tests()
 for script in (ROOT / "models/bar91/ssh").glob("*.sh"):
@@ -520,6 +613,6 @@ passed("shell_syntax_and_no_embedded_password_hashes_keys_or_binaries")
 out = ROOT / "build/test-results"
 out.mkdir(parents=True, exist_ok=True)
 (out / "ssh-tests.json").write_text(json.dumps({
-    "scope": "Host fixtures: per-owner builder, integrity, CIDR selection, actual hook transaction/rollback, active installation upgrade, bounded boot failure and listener moves after LAN address changes with a stand-in daemon. Native binaries and physical reboot not exercised.",
+    "scope": "Host fixtures: per-owner builder, integrity, CIDR selection, SSH session command resolution, actual hook transaction/rollback, active installation upgrade, bounded boot failure and listener moves after LAN address changes with a stand-in daemon. Native binaries and physical reboot not exercised.",
     "cases": cases,
 }, indent=2) + "\n")
