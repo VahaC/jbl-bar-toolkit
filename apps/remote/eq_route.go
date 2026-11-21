@@ -19,8 +19,9 @@ import (
 //   - not the custom mode: controls proceed; the reset stays pending and the
 //     EQ monitor confirms it (mode, preset and baseline) once the qualified
 //     route returns;
-//   - custom mode still active: changing input or selecting Standard proceeds,
-//     since both lead back to a route where Reset works, and so does turning
+//   - custom mode still active: changing input (Bluetooth pairing included: it
+//     sends the Bluetooth input key) or selecting Standard proceeds, since both
+//     lead back to a route where Reset works, and so does turning
 //     the bar off: the bar brings its native preset back on wake and the EQ
 //     monitor finishes the reset then (eqFollowDropped). Refusing it left no
 //     way to turn the bar off from the page or Home Assistant with the EQ on
@@ -56,7 +57,7 @@ func eqPendingDecision(resetErr error, action string, mode func() (uint32, error
 	if m, e := mode(); e == nil && m != eqCustomMode {
 		return true, eqDeferredProblem, nil
 	}
-	if strings.HasPrefix(action, "input_") || action == "standard" || action == "power" {
+	if strings.HasPrefix(action, "input_") || action == "bluetooth_pair" || action == "standard" || action == "power" {
 		return true, eqActiveProblem, nil
 	}
 	return false, eqActiveProblem, errors.New(eqActiveProblem)
