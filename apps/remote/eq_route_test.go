@@ -63,6 +63,9 @@ func TestEQPendingResetDecision(t *testing.T) {
 		{"custom EQ active refuses levels", errEQRoute, "bass_next", mode(eqCustomMode, nil), false, eqActiveProblem, "Select Standard"},
 		{"custom EQ active allows input", errEQRoute, "input_bluetooth", mode(eqCustomMode, nil), true, eqActiveProblem, ""},
 		{"custom EQ active allows Standard", errEQRoute, "standard", mode(eqCustomMode, nil), true, eqActiveProblem, ""},
+		{"custom EQ active allows turning off", errEQRoute, "power", mode(eqCustomMode, nil), true, eqActiveProblem, ""},
+		{"unreadable mode allows turning off", errEQRoute, "power", mode(0, unreadable), true, eqActiveProblem, ""},
+		{"custom EQ active allows Bluetooth pairing", errEQRoute, "bluetooth_pair", mode(eqCustomMode, nil), true, eqActiveProblem, ""},
 		{"unreadable mode refuses levels", errEQRoute, "atmos_next", mode(0, unreadable), false, eqActiveProblem, "then try again"},
 		{"unreadable mode allows input", errEQRoute, "input_tv", mode(0, unreadable), true, eqActiveProblem, ""},
 	}
