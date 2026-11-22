@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +21,7 @@ type fakeDisplay struct {
 	mem     map[int64]uint32
 	text    string
 	gateOff bool     // simulate another control holding the gate
+	stepErr error    // simulate the bar's own process away (starting)
 	own     bool     // simulate keys the remote sends itself
 	shown   []string // text visible on screen at each change
 	visible string   // what the screen shows now
@@ -89,6 +92,9 @@ func (f *fakeDisplay) step(force bool, fn func(displayMem) error) error {
 	if f.gateOff && !force {
 		return errDisplayGate
 	}
+	if f.stepErr != nil && !force {
+		return f.stepErr
+	}
 	err := fn(fakeDisplayMem{f})
 	f.render()
 	return err
@@ -123,8 +129,13 @@ func (m fakeDisplayMem) tick() (uint32, error) {
 
 func startDisplay(t *testing.T, level3 uint32) (*fakeDisplay, *displayManager, func()) {
 	t.Helper()
+	return startDisplayLog(t, level3, t.Logf)
+}
+
+func startDisplayLog(t *testing.T, level3 uint32, logf func(string, ...any)) (*fakeDisplay, *displayManager, func()) {
+	t.Helper()
 	f := newFakeDisplay(level3)
-	m := newDisplayManager(f, t.Logf)
+	m := newDisplayManager(f, logf)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { m.Run(ctx); close(done) }()
@@ -625,5 +636,33 @@ func TestDisplayWhenOnReplacedOrCleared(t *testing.T) {
 	defer m.mu.Unlock()
 	if len(m.held) != 0 || len(m.queue) != 0 {
 		t.Fatalf("left over: held %d, queue %d", len(m.held), len(m.queue))
+	}
+}
+
+// A message waiting for the bar to be on looks every second: with the bar's
+// own process away, it writes that once, then once that it works again.
+func TestDisplayWhenOnWritesAnUnreadableBarOnce(t *testing.T) {
+	var mu sync.Mutex
+	var lines []string
+	f, m, stop := startDisplayLog(t, vfdLevel3StandbyBlank, func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, fmt.Sprintf(format, args...))
+	})
+	defer stop()
+	f.mu.Lock()
+	f.stepErr = errors.New("soundbar is starting")
+	f.mu.Unlock()
+	show(t, m, `{"text":"vu","id":"vu","when_on":true}`)
+	time.Sleep(20 * displayHoldPoll / displayScale)
+	f.mu.Lock()
+	f.stepErr = nil
+	f.mu.Unlock()
+	wake(f)
+	waitScreen(t, f, "text:VU", 10*time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(lines, "|") != "Display message vu: bar state unreadable: soundbar is starting|Display message vu: working again" {
+		t.Fatalf("log: %q", lines)
 	}
 }

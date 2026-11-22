@@ -73,6 +73,7 @@ type displayClock struct {
 	hold  displayJob // own / stby as for a message; req.ID "clock" for logs
 	free  int
 	shown string
+	errs  quietLog
 }
 
 func newDisplayClock(m *displayManager, port displayPort, path string, logf func(string, ...any)) *displayClock {
@@ -298,6 +299,8 @@ func (c *displayClock) tick() {
 		return nil
 	})
 	if err != nil && err != errDisplayGate {
-		c.logf("Display clock: %v", err)
+		c.errs.failed(c.logf, "Display clock: "+err.Error())
+	} else if err == nil {
+		c.errs.ok(c.logf, "Display clock")
 	}
 }

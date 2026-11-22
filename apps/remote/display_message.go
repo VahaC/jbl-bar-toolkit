@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -325,6 +326,26 @@ func (m *displayManager) Show(r displayRequest) error {
 	m.running.Add(1)
 	go m.run(job)
 	return nil
+}
+
+// quietLog writes a polling loop's error once, not on every poll, and then
+// once that it works again. With the bar's own process away (starting, or
+// stuck on "Starting"), the clock polls five times a second and wrote "soundbar
+// is starting" each time: remote.log grew without bound.
+type quietLog struct{ last string }
+
+func (q *quietLog) failed(logf func(string, ...any), message string) {
+	if message != q.last {
+		q.last = message
+		logf("%s", message)
+	}
+}
+
+func (q *quietLog) ok(logf func(string, ...any), what string) {
+	if q.last != "" {
+		q.last = ""
+		logf("%s: working again", what)
+	}
 }
 
 func removeJob(jobs []*displayJob, job *displayJob) []*displayJob {
@@ -789,6 +810,7 @@ func (m *displayManager) show(job *displayJob, text string, d time.Duration) err
 // hold waits, out of the line, until the bar is on, then puts job at the end
 // of the line; its duration counts from then.
 func (m *displayManager) hold(job *displayJob) error {
+	var errs quietLog
 	for {
 		awake := false
 		err := m.port.step(false, func(mem displayMem) error {
@@ -797,7 +819,9 @@ func (m *displayManager) hold(job *displayJob) error {
 			return e
 		})
 		if err != nil && err != errDisplayGate {
-			m.logf("Display message %s: bar state unreadable: %v", job.req.ID, err)
+			errs.failed(m.logf, fmt.Sprintf("Display message %s: bar state unreadable: %v", job.req.ID, err))
+		} else if err == nil {
+			errs.ok(m.logf, "Display message "+job.req.ID)
 		}
 		if err == nil && awake {
 			m.mu.Lock()
